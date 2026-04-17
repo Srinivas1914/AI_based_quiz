@@ -269,12 +269,15 @@ function renderUsers(){
   const teams=Store.getTeams();
   
   // Normal admins ONLY see their own quiz participants
+  // Normal admins see ALL users from their college, plus anyone who joined their specific quiz
   if (!sess.isSuper) {
-    if (sess.quizId) {
-      users = users.filter(u => u.currentQuizId === sess.quizId);
-    } else {
-      users = [];
-    }
+    const adminCollege = (sess.college || '').trim().toLowerCase();
+    users = users.filter(u => {
+      const uCollege = (u.college || '').trim().toLowerCase();
+      const matchCollege = uCollege && adminCollege && uCollege === adminCollege;
+      const matchQuiz = sess.quizId && u.currentQuizId === sess.quizId;
+      return matchCollege || matchQuiz;
+    });
   }
   
   // Normal admins CANNOT see or manage other admins

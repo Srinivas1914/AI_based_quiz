@@ -306,26 +306,33 @@ async function initializeData() {
 
 async function saveData(key, val) {
   try {
+    const timestamp = Date.now();
+    
     // We update local memory first for instant UI response
     syncData[key] = val;
+    syncData[`_ts_${key}`] = timestamp;
 
-    // Check connection state
+    // Persist to local file IMMEDIATELY (Safety Fallback)
+    try {
+      const fs = require('fs');
+      fs.writeFileSync(path.join(staticDir, 'data.json'), JSON.stringify(syncData, null, 2));
+    } catch(fsErr) {
+      console.warn('[SERVER] File write failed, relying on memory:', fsErr.message);
+    }
+
+    // Check connection state for MongoDB
     const state = mongoose.connection.readyState;
-    
-    // If connected (1) or connecting (2), we let Mongoose handle it (with buffering)
     if (state === 1 || state === 2) {
-      await StorageModel.findOneAndUpdate({ key }, { val }, { upsert: true });
+      await StorageModel.findOneAndUpdate({ key }, { val, _ts: timestamp }, { upsert: true });
       await syncToCollections(key, val);
     } else {
-      // If disconnected (0) or disconnecting (3), we just keep it in memory
-      // The skipped saves in the logs were annoying the user, so we'll only log it once per minute if disconnected
       if (!global._lastDbWarn || Date.now() - global._lastDbWarn > 60000) {
-        console.warn(`[SERVER] 💾 Warning: Data saved to MEMORY only. MongoDB is currently unreachable.`);
+        console.warn(`[SERVER] 💾 Data saved to MEMORY + FILE. MongoDB is currently unreachable.`);
         global._lastDbWarn = Date.now();
       }
     }
   } catch (e) {
-    console.error('[SERVER] Error saving to MongoDB:', e);
+    console.error('[SERVER] Error saving data:', e);
   }
 }
 
@@ -367,8 +374,12 @@ io.on('connection', (socket) => {
         // 2. If College Admin (Normal Admin), filter by their assigned college
         if (isAdmin && !isSuper) {
            const users = JSON.parse(val || '[]');
-           // Backend Enforced: Only users matching the admin's college are visible
-           const institutionalUsers = users.filter(u => u.college === user.college);
+           // Backend Enforced: Only users matching the admin's college (or their current quiz) are visible
+           const institutionalUsers = users.filter(u => {
+             const uInst = (u.college || '').trim().toLowerCase();
+             const adminInst = (user.college || '').trim().toLowerCase();
+             return (uInst && adminInst && uInst === adminInst) || (user.quizId && u.currentQuizId === user.quizId);
+           });
            val = JSON.stringify(institutionalUsers);
            console.log(`[SECURITY] Institution Filter: Sending ${institutionalUsers.length} users to ${user.name} (College: ${user.college})`);
         }
@@ -435,9 +446,12 @@ io.on('connection', (socket) => {
 
       if (data.key === 'sq_session') return; 
       
+      const timestamp = data._ts || Date.now();
       syncData[data.key] = data.val;
+      syncData[`_ts_${data.key}`] = timestamp;
+      
       await saveData(data.key, data.val);
-      socket.broadcast.emit('sync', data);
+      socket.broadcast.emit('sync', { ...data, _ts: timestamp });
       
     } catch (err) {
       console.warn(`[SECURITY] Sync rejected: Invalid session from ${ip}`);

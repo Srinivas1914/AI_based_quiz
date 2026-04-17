@@ -6,7 +6,13 @@ if (typeof io !== 'undefined') {
     auth: { token }
   });
   socket.on('sync', (data) => {
+    // VERSION CHECK: Only apply sync if it's newer than what we have
+    const localTs = parseInt(localStorage.getItem(`_ts_${data.key}`) || '0');
+    if (data._ts && data._ts < localTs) return; // Ignore older broadcast
+    
     localStorage.setItem(data.key, data.val);
+    if(data._ts) localStorage.setItem(`_ts_${data.key}`, data._ts);
+    
     window.dispatchEvent(new CustomEvent('storage_sync', { detail: { key: data.key } }));
   });
 }
@@ -88,7 +94,10 @@ function save(key, val){
     // NEVER sync the local user session or individual camera frames to everyone
     if(key !== KEYS.SESSION && !key.startsWith(KEYS.CAM_PREFIX)){
       const token = localStorage.getItem('sq_token');
-      socket.emit('sync', { key, val: str, token });
+      // VERSIONED SYNC: Attach timestamp to prevent race conditions
+      const timestamp = Date.now();
+      localStorage.setItem(`_ts_${key}`, timestamp);
+      socket.emit('sync', { key, val: str, token, _ts: timestamp });
     }
   }
 }
