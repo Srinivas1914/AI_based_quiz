@@ -399,18 +399,32 @@ io.on('connection', (socket) => {
            const incomingUsers = JSON.parse(data.val || '[]');
            const existingUsers = JSON.parse(syncData['sq_users'] || '[]');
            
-           // BACKEND ENFORCEMENT: 
-           // 1. Keep users from other institutions untouched
-           const otherInstitutions = existingUsers.filter(u => u.college !== decoded.college);
+           const adminInst = (decoded.college || '').trim().toLowerCase();
            
-           // 2. Only allow the admin to update/inject users belonging to their own institution
-           const myInstitutionalUpdates = incomingUsers.filter(u => u.college === decoded.college);
+           // 1. Keep users from other institutions untouched (Safety Lock)
+           const otherInstitutions = existingUsers.filter(u => {
+             const uInst = (u.college || '').trim().toLowerCase();
+             return uInst !== adminInst;
+           });
+           
+           // 2. Process updates for this admin's institution
+           // We filter incoming users that belong to this admin's college
+           // CRITICAL: We also AUTO-ASSIGN the college to any users being synced by this admin
+           // if they belong to their view (to prevent accidental data loss due to missing fields)
+           const myInstitutionalUpdates = incomingUsers.filter(u => {
+             const uInst = (u.college || '').trim().toLowerCase();
+             // If the user being synced has no college, or it matches the admin's
+             return uInst === adminInst || !uInst;
+           }).map(u => {
+             // Force the college to match exactly the admin's record for consistency
+             return { ...u, college: decoded.college };
+           });
            
            // 3. Re-merge for consistent storage record
            const merged = [...otherInstitutions, ...myInstitutionalUpdates];
            data.val = JSON.stringify(merged);
            
-           console.log(`[SECURITY] Isolation Check: Merged ${myInstitutionalUpdates.length} users for ${decoded.college}. Locked out ${otherInstitutions.length} foreign records.`);
+           console.log(`[SECURITY] Isolation Sync: ${myInstitutionalUpdates.length} users updated for ${decoded.college}.`);
          }
       }
 
