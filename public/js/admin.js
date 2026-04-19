@@ -1,7 +1,25 @@
 // ===== ADMIN JS =====
-const sessCheck = Store.getSession();
-if(!sessCheck) { window.location.href = '/index.html'; }
-requireRole('admin');
+// Rehydration check: wait for storage to be ready
+(function initAuth() {
+  const sess = Store.getSession();
+  if(!sess) { 
+    // If we have a token but no session, we might be rehydrating from a refresh
+    const token = Store.getToken();
+    if (token) {
+       console.log('[AUTH] Rehydrating session...');
+       // We can continue, initAdminInfo will handle the rest
+    } else {
+       window.location.href = '/index.html'; 
+       return;
+    }
+  }
+  if (sess && sess.role !== 'admin') {
+    window.location.href = '/index.html';
+    return;
+  }
+})();
+
+let aiGeneratedResults = []; // Ensure global exists
 
 let currentSec = 'dashboard';
 let adminTimerIv = null;
@@ -38,19 +56,33 @@ function initAdminInfo(){
   const sess = Store.getSession();
   const managed = Store.getManagedQuizzes();
   const q = managed.find(x => x.quizId === sess.quizId);
+  const quizIdEl = document.getElementById('atb-quiz-id-val');
+  const sbQuizIdEl = document.getElementById('sb-quiz-id');
   
   if(q){
-    document.getElementById('atb-college-name').textContent = q.collegeName;
-    document.getElementById('atb-college-code').textContent = q.collegeCode;
-    document.getElementById('atb-quiz-id-val').textContent = q.quizId;
+    document.getElementById('atb-college-name').textContent = q.collegeName || "ADMIN DASHBOARD";
+    document.getElementById('atb-college-code').textContent = q.collegeCode || "QUIZ";
+    if(quizIdEl) quizIdEl.textContent = q.quizId;
+    if(sbQuizIdEl){
+      sbQuizIdEl.textContent = `QUIZ ID: ${q.quizId}`;
+      sbQuizIdEl.style.display = 'block';
+    }
   } else if (sess.isSuper) {
-    document.getElementById('atb-quiz-id-val').textContent = "GLOBAL (SUPER)";
+    if(quizIdEl) quizIdEl.textContent = "GLOBAL (SUPER)";
     document.getElementById('atb-college-name').textContent = "SUPER ADMIN DASHBOARD";
     document.getElementById('atb-college-code').textContent = "SYSTEM";
+    if(sbQuizIdEl){
+      sbQuizIdEl.textContent = "GLOBAL (SUPER)";
+      sbQuizIdEl.style.display = 'block';
+    }
   } else if (sess.quizId) {
-    document.getElementById('atb-quiz-id-val').textContent = sess.quizId;
+    if(quizIdEl) quizIdEl.textContent = sess.quizId;
     document.getElementById('atb-college-name').textContent = "ADMIN DASHBOARD";
     document.getElementById('atb-college-code').textContent = "QUIZ";
+    if(sbQuizIdEl){
+      sbQuizIdEl.textContent = `QUIZ ID: ${sess.quizId}`;
+      sbQuizIdEl.style.display = 'block';
+    }
   }
   
   document.getElementById('atb-admin-name').textContent = sess.name || (sess.isSuper ? 'Super Admin' : 'Admin');
@@ -80,11 +112,33 @@ function renderDashboard(){
 
   const ps = Store.getParticipants();
   document.getElementById('kpi-row').innerHTML=`
-    <div class="kpi cyan"><div class="kpi-val">${users.length}</div><div class="kpi-lbl">USERS</div></div>
-    <div class="kpi green"><div class="kpi-val">${users.filter(u=>u.role==='participant').length}</div><div class="kpi-lbl">PARTICIPANTS</div></div>
-    <div class="kpi gold"><div class="kpi-val">${aTeams.length}</div><div class="kpi-lbl">ACTIVE TEAMS</div></div>
-    <div class="kpi purple"><div class="kpi-val">${rounds.length}</div><div class="kpi-lbl">ROUNDS</div></div>
-    <div class="kpi red"><div class="kpi-val">${questions.length}</div><div class="kpi-lbl">QUESTIONS</div></div>`;
+    <div class="kpi cyan" onclick="goSection('users')">
+      <span class="kpi-click-hint">↗ click</span>
+      <div class="kpi-val">${users.length}</div>
+      <div class="kpi-lbl">USERS</div>
+    </div>
+    <div class="kpi green" onclick="goSection('users')">
+      <span class="kpi-click-hint">↗ click</span>
+      <div class="kpi-val">${users.filter(u=>u.role==='participant').length}</div>
+      <div class="kpi-lbl">PARTICIPANTS</div>
+    </div>
+    <div class="kpi gold" onclick="goSection('teams')">
+      <span class="kpi-click-hint">↗ click</span>
+      <div class="kpi-val">${aTeams.length}</div>
+      <div class="kpi-lbl">ACTIVE TEAMS</div>
+    </div>
+    <div class="kpi purple" onclick="goSection('rounds')">
+      <span class="kpi-click-hint">↗ click</span>
+      <div class="kpi-val">${rounds.length}</div>
+      <div class="kpi-lbl">ROUNDS</div>
+    </div>
+    <div class="kpi red" onclick="goSection('questions')">
+      <span class="kpi-click-hint">↗ click</span>
+      <div class="kpi-val">${questions.length}</div>
+      <div class="kpi-lbl">QUESTIONS</div>
+    </div>`;
+
+
 
   // Quiz status
   const sColor={idle:'gray',round_intro:'cyan',running:'green',paused:'gold',participant_turn:'purple',round_end:'purple',finished:'cyan'};
@@ -653,42 +707,28 @@ function runElimination(){
 
 // ─── ROUNDS ───────────────────────────────────────────────────
 function renderRounds(){
-  const rounds=Store.getRounds(), questions=Store.getQuestions();
-  const total=getTotalConfiguredQs(rounds);
-  document.getElementById('rounds-overview').innerHTML=`${rounds.length} rounds · ${total} slots · ${questions.length} questions in bank &nbsp;${questions.length<total?'<span class="badge badge-red">⚠ Need more</span>':'<span class="badge badge-green">✓ OK</span>'}`;
+  const rounds=Store.getRounds();
   const el=document.getElementById('rounds-table');
-  if(!rounds.length){ el.innerHTML='<div class="empty-state">No rounds. Click "+ ADD ROUND".</div>'; return; }
+  const ov=document.getElementById('rounds-overview');
+  if(!rounds.length){ el.innerHTML='<div class="empty-state">No rounds configured.</div>'; ov.innerHTML=''; return; }
   
-  const stages = ['Preliminary', 'Selection', 'Final'];
-  let start=0;
-  
-  el.innerHTML = stages.map(st => {
-    const sRounds = rounds.filter(r => (r.stage||'Preliminary') === st);
-    if(!sRounds.length) return '';
-    
-    // Group start index needs to be persistent across the full round list
-    // So we calculate the global 'start' correctly.
-    
-    return `<div class="stage-header mt-3 mb-1" style="background:rgba(255,255,255,0.05); padding:8px 12px; border-radius:6px; font-weight:bold; color:var(--gold); display:flex; justify-content:space-between; align-items:center">
-      <span>${st.toUpperCase()} STAGE</span>
-      <span class="badge badge-cyan" style="font-size:10px">${sRounds.length} ROUNDS</span>
-    </div>
-    <table class="dtable"><thead><tr><th>#</th><th>NAME</th><th>Qs</th><th>TIME/Q</th><th>Q RANGE</th><th>ACTIONS</th></tr></thead><tbody>` +
-    sRounds.map((r, i) => {
-      // Find true global index for Q Range
-      const globalIdx = rounds.findIndex(x => x.id === r.id);
-      let gStart = 0;
-      for(let j=0; j<globalIdx; j++) gStart += rounds[j].questionCount;
-      const gEnd = gStart + r.questionCount - 1;
-      
-      return `<tr><td>${r.roundNumber||globalIdx+1}</td><td><strong>${r.name}</strong></td>
-        <td><span class="badge badge-cyan">${r.questionCount}</span></td>
-        <td>${r.timePerQuestion}s</td>
-        <td class="text-xs text-muted">Q${gStart+1}–Q${gEnd+1}</td>
-        <td><button class="btn-icon" onclick="openEditRound('${r.id}')">✏️</button>
-          <button class="btn-icon" style="color:var(--red)" onclick="deleteRound('${r.id}')">🗑️</button></td></tr>`;
-    }).join('') + '</tbody></table>';
-  }).join('');
+  const total=rounds.reduce((a,b)=>a+(b.questionCount||0),0);
+  const totalMins=rounds.reduce((a,b)=>a+Math.ceil(((b.questionCount||0)*(b.timePerQuestion||60) + (b.roundTimeLimit||0)*60)/60),0);
+  ov.innerHTML=`<span class="badge badge-purple">${rounds.length} Rounds</span> <span class="badge badge-cyan">${total} Total Questions</span> <span class="badge badge-gold">~${totalMins} Minutes Est.</span>`;
+
+  el.innerHTML=`<table class="dtable"><thead><tr>
+    <th style="width:30px"><input type="checkbox" id="chk-rounds-all" onclick="toggleSelectAll('rounds', this.checked)"></th>
+    <th>ID</th><th>NAME</th><th>STAGE</th><th>QS</th><th>TIME/Q</th><th>SUBSEC</th><th></th></tr></thead><tbody>`+
+  rounds.map((r,i)=>`<tr>
+    <td><input type="checkbox" class="chk-round" value="${r.id}" onclick="onSelectRow('rounds')"></td>
+    <td class="text-xs text-muted">R${r.roundNumber || i+1}</td>
+    <td><strong>${r.name}</strong></td>
+    <td><span class="badge badge-purple">${r.stage||'Preliminary'}</span></td>
+    <td><span class="badge badge-cyan">${r.questionCount}</span></td>
+    <td>${r.timePerQuestion}s</td>
+    <td class="text-xs text-muted">${r.roundTimeLimit?`+${r.roundTimeLimit}m`:''}</td>
+    <td><button class="btn-icon" onclick="openEditRound('${r.id}')">✏️</button></td></tr>`).join('')+'</tbody></table>';
+  onSelectRow('rounds');
 }
 
 function openAddRound(){ document.getElementById('rm-id').value=''; ['rm-name','rm-instr'].forEach(id=>document.getElementById(id).value=''); document.getElementById('rm-num').value=Store.getRounds().length+1; document.getElementById('rm-qcount').value='5'; document.getElementById('rm-stage').value='Preliminary'; document.getElementById('rm-qtime').value=Store.getSettings().defaultTimePerQuestion||'60'; document.getElementById('rm-rtime').value='0'; document.getElementById('rm-err').textContent=''; document.getElementById('round-modal-title').textContent='ADD ROUND'; openModal('modal-round'); }
@@ -705,13 +745,32 @@ function deleteRound(id){
 function moveRound(id,dir){ const rounds=Store.getRounds(); const idx=rounds.findIndex(r=>r.id===id); const ni=idx+dir; if(ni<0||ni>=rounds.length) return; [rounds[idx],rounds[ni]]=[rounds[ni],rounds[idx]]; Store.saveRounds(rounds); renderRounds(); }
 
 // ─── QUIZ TEMPLATES ───────────────────────────────────────────
-function openTemplatesModal(){ openModal('modal-templates'); updateTemplatePreview(); }
+function openTemplatesModal(){
+  openModal('modal-templates');
+  updateTemplatePreview();
+}
+
+
+function onRoundsChange(){
+  const r = parseInt(document.getElementById('tmpl-rounds').value);
+  const tEl = document.getElementById('tmpl-time');
+  const mapping = { 3: 30, 4: 35, 5: 40, 10: 50, 15: 60 };
+  if(mapping[r]) {
+    tEl.value = mapping[r];
+    const badge = document.getElementById('auto-set-badge-time');
+    badge.style.display = 'inline-block';
+    setTimeout(() => badge.style.display = 'none', 2000);
+  }
+  updateTemplatePreview();
+}
+
 function updateTemplatePreview(){
   const roundCount = parseInt(document.getElementById('tmpl-rounds')?.value || 3);
   const totalMins = parseInt(document.getElementById('tmpl-time')?.value || 30);
   const qsPerRound = 5;
   const totalQs = roundCount * qsPerRound;
   const timePerQ = Math.floor((totalMins * 60) / totalQs);
+
   
   // Calculate stage breakdown
   let stages = { Preliminary: 0, Selection: 0, Final: 0 };
@@ -736,14 +795,15 @@ function updateTemplatePreview(){
     <span style="color:var(--gold)">${stages.Selection} Selection</span> → 
     <span style="color:var(--green)">${stages.Final} Final</span>`;
 }
-function applyQuizTemplate(){
-  const roundCount = parseInt(document.getElementById('tmpl-rounds').value);
-  const totalMins = parseInt(document.getElementById('tmpl-time').value);
+function applyQuizTemplate(presetName = null, presetRounds = null, presetTime = null){
+  const roundCount = presetRounds || parseInt(document.getElementById('tmpl-rounds').value);
+  const totalMins = presetTime || parseInt(document.getElementById('tmpl-time').value);
+  const finalName = presetName || "Quick Setup";
   const qsPerRound = 5;
   const totalQs = roundCount * qsPerRound;
   const timePerQ = Math.floor((totalMins * 60) / totalQs);
   
-  customConfirm(`Applying template will replace current rounds with <strong>${roundCount} rounds</strong> (${totalMins} min total). Continue?`, '⚡', () => {
+  customConfirm(`Applying <strong>${finalName}</strong> will replace current rounds with <strong>${roundCount} rounds</strong> (${totalMins} min total). Continue?`, '⚡', () => {
     const newRounds = [];
     for(let i=1; i<=roundCount; i++){
       // Auto-assign tournament stages based on round position
@@ -771,13 +831,24 @@ function applyQuizTemplate(){
     }
     
     Store.saveRounds(newRounds);
-    Store.saveQuiz({...Store.getQuiz(), status: 'idle', currentRoundIdx: 0, globalQIdx: 0}); // Reset quiz state
+    const quiz = Store.getQuiz();
+    quiz.templateName = finalName;
+    quiz.templateDuration = totalMins;
+    quiz.status = 'idle';
+    quiz.currentRoundIdx = 0;
+    quiz.globalQIdx = 0;
+    Store.saveQuiz(quiz); 
     
-    toast(`Template applied: ${roundCount} Rounds, ${timePerQ}s per question`,'success');
+    toast(`Template applied: ${finalName}`,'success');
     closeModal('modal-templates');
     renderRounds();
   });
 }
+
+function applyPreset(name, rounds, time){
+  applyQuizTemplate(name, rounds, time);
+}
+
 
 // ─── QUESTIONS ────────────────────────────────────────────────
 function renderQuestions(){
@@ -786,17 +857,19 @@ function renderQuestions(){
   const filterSel=document.getElementById('q-round-filter');
   if(filterSel) filterSel.innerHTML='<option value="">All Rounds</option>'+rounds.map((r,i)=>`<option value="${i}" ${filterVal==i?'selected':''}>R${r.roundNumber||i+1}: ${r.name}</option>`).join('');
   document.getElementById('q-summary').innerHTML=rounds.map((r,i)=>{const range=getRoundQRange(rounds,i);const have=Math.max(0,Math.min(r.questionCount,questions.length-range.start));return `<span class="badge ${have>=r.questionCount?'badge-green':'badge-red'}">${r.name}: ${have}/${r.questionCount}</span>`;}).join(' ')||'<span class="text-muted">No rounds</span>';
-  const qmRound=document.getElementById('qm-round');
-  if(qmRound) qmRound.innerHTML='<option value="">Auto</option>'+rounds.map((r,i)=>`<option value="${i}">R${r.roundNumber||i+1}: ${r.name}</option>`).join('');
   const el=document.getElementById('questions-table');
   if(!questions.length){el.innerHTML='<div class="empty-state">No questions yet.</div>';return;}
   let filtered=questions.map((q,i)=>({...q,_gi:i}));
   if(filterVal!==''&&filterVal!=null&&filterVal!==undefined){const ri=parseInt(filterVal);const range=getRoundQRange(rounds,ri);filtered=filtered.filter(q=>q._gi>=range.start&&q._gi<=range.end);}
-  el.innerHTML=`<table class="dtable"><thead><tr><th>#</th><th>RND</th><th>QUESTION</th><th>TYPE</th><th>ANSWER</th><th></th></tr></thead><tbody>`+
+  el.innerHTML=`<table class="dtable"><thead><tr>
+    <th style="width:30px"><input type="checkbox" id="chk-questions-all" onclick="toggleSelectAll('questions', this.checked)"></th>
+    <th>#</th><th>RND</th><th>QUESTION</th><th>TYPE</th><th>ANSWER</th><th></th></tr></thead><tbody>`+
   filtered.map(q=>{
     let rLabel='—',qs=0;
     for(let i=0;i<rounds.length;i++){if(q._gi>=qs&&q._gi<qs+rounds[i].questionCount){rLabel=`R${rounds[i].roundNumber||i+1}`;break;}qs+=rounds[i].questionCount;}
-    return `<tr><td class="text-muted text-xs">${q._gi+1}</td><td><span class="badge badge-cyan">${rLabel}</span></td>
+    return `<tr>
+      <td><input type="checkbox" class="chk-question" value="${q.id}" onclick="onSelectRow('questions')"></td>
+      <td class="text-muted text-xs">${q._gi+1}</td><td><span class="badge badge-cyan">${rLabel}</span></td>
       <td class="text-sm" style="max-width:300px">${q.text}</td>
       <td><span class="badge ${q.type==='multiple'?'badge-purple':'badge-cyan'}">${q.type==='multiple'?'MULTI':'SINGLE'}</span></td>
       <td><span class="badge badge-green">${(q.correct||[]).map(c=>String.fromCharCode(65+c)).join(',')}</span></td>
@@ -837,6 +910,17 @@ function renderControl(){
     ri.innerHTML=`<span class="badge badge-gold" style="margin-right:6px;font-size:9px">${curStage.toUpperCase()}</span> Round ${quiz.currentRoundIdx+1}: ${rounds[quiz.currentRoundIdx].name}`;
   }else ri.style.display='none';
 
+  const tBadge = document.getElementById('c-template-badge');
+  if(tBadge){
+    if(quiz.templateName){
+      tBadge.style.display = 'inline-flex';
+      tBadge.innerHTML = `📋 ${quiz.templateName} · ${quiz.templateDuration} min`;
+    } else {
+      tBadge.style.display = 'none';
+    }
+  }
+
+
   const sh=id=>document.getElementById(id)?.classList.remove('hidden');
   const hd=id=>document.getElementById(id)?.classList.add('hidden');
   const shSt=(id,v)=>{ const el=document.getElementById(id); if(el) el.style.display=v; };
@@ -847,6 +931,8 @@ function renderControl(){
   shSt('btn-next',s==='running'||s==='paused'?'inline-flex':'none');
   (s==='running'||s==='paused')?sh('btn-end-round'):hd('btn-end-round');
   s==='round_end'?sh('btn-next-round'):hd('btn-next-round');
+  s==='finished'?(document.getElementById('btn-next-round').classList.remove('hidden'), document.getElementById('btn-next-round').textContent='🏆 ANNOUNCE WINNER'):null;
+
 
   // Current question view - ALWAYS show latest from store
   const qv=document.getElementById('c-question-view'), qb=document.getElementById('c-q-badge');
@@ -889,8 +975,96 @@ function renderControl(){
   renderTeamAnswers();
   renderScoreboard('c-scores');
   renderLoginStatusPanel();
+  renderCommandTargets();
   startAdminTimer();
 }
+
+function renderCommandTargets(){
+  const teams = Store.getActiveTeams();
+  const sel = document.getElementById('cmd-target-team');
+  if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">All Active Teams</option>' + 
+    teams.map(t => `<option value="${t.id}" ${t.id===cur?'selected':''}>T${t.teamNumber}: ${t.name}</option>`).join('');
+}
+
+function sendGlobalMsg(){
+  const msg = document.getElementById('cmd-broadcast-msg').value.trim();
+  if(!msg) return;
+  socket.emit('admin_cmd', { type: 'msg', target: 'all', msg });
+  document.getElementById('cmd-broadcast-msg').value = '';
+  toast('Global message sent', 'success');
+  Store.addActivity(`📢 Admin Broadcast: ${msg}`, 'info');
+}
+
+function cmdAction(action){
+  const target = document.getElementById('cmd-target-team').value;
+  const msgInput = document.getElementById('cmd-broadcast-msg');
+  const msg = msgInput.value.trim();
+  
+  if(action === 'hold'){
+    const quiz = Store.getQuiz();
+    if(!quiz.holdStatus) quiz.holdStatus = {};
+    const currentStatus = !!quiz.holdStatus[target];
+    quiz.holdStatus[target] = !currentStatus;
+    Store.saveQuiz(quiz);
+    socket.emit('admin_cmd', { type: 'hold', target, status: !currentStatus });
+    toast(`${target ? 'Team' : 'All teams'} ${!currentStatus ? 'HELD' : 'RELEASED'}`, 'warning');
+    Store.addActivity(`🛑 Admin ${!currentStatus ? 'held' : 'released'} ${target || 'all teams'}`, 'warning');
+    return;
+  }
+
+  if(!msg && (action === 'warn' || action === 'msg')) {
+    toast('Please enter a message first', 'error');
+    return;
+  }
+
+  socket.emit('admin_cmd', { type: action, target: target || 'all', msg });
+  msgInput.value = '';
+  toast(`${action.toUpperCase()} sent`, 'success');
+  Store.addActivity(`⚠️ Admin ${action}: ${msg} (Target: ${target || 'All'})`, 'warning');
+}
+
+// ─── MIC BROADCAST (PTT) ─────────────────────────────────────
+let mediaRecorder = null;
+let audioChunks = [];
+
+async function startMicBroadcast(){
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    audioChunks = [];
+    
+    mediaRecorder.ondataavailable = e => { if(e.data.size > 0) audioChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(audioChunks, { type: 'audio/webm' });
+      const target = document.getElementById('cmd-target-team').value || 'all';
+      const reader = new FileReader();
+      reader.onload = () => {
+        socket.emit('admin_audio', { audio: reader.result, target });
+      };
+      reader.readAsDataURL(blob);
+      stream.getTracks().forEach(t => t.stop());
+    };
+
+    
+    mediaRecorder.start();
+    document.getElementById('btn-admin-mic').style.boxShadow = '0 0 15px var(--red)';
+    document.getElementById('btn-admin-mic').style.transform = 'scale(1.2)';
+    Store.addActivity('🎤 Admin speaking...', 'warning');
+  } catch(e) {
+    toast('Mic error: ' + e.message, 'error');
+  }
+}
+
+function stopMicBroadcast(){
+  if(mediaRecorder && mediaRecorder.state !== 'inactive'){
+    mediaRecorder.stop();
+    document.getElementById('btn-admin-mic').style.boxShadow = 'none';
+    document.getElementById('btn-admin-mic').style.transform = 'scale(1)';
+  }
+}
+
 
 function renderLoginStatusPanel(){
   const el=document.getElementById('c-login-status'); if(!el) return;
@@ -1035,7 +1209,15 @@ function showRoundScores(ri){ const rounds=Store.getRounds(),teams=Store.getActi
 function nextRound(){
   const quiz=Store.getQuiz(),rounds=Store.getRounds(),teams=Store.getActiveTeams();
   const ni=quiz.currentRoundIdx+1;
-  if(ni>=rounds.length){ const q2={...quiz,status:'finished'}; Store.saveQuiz(q2); Store.addActivity('🏆 Quiz FINISHED!','success'); toast('Quiz complete!','success'); renderControl(); return; }
+  if(ni>=rounds.length){ 
+    const q2={...quiz,status:'finished'}; 
+    Store.saveQuiz(q2); 
+    Store.addActivity('🏆 Quiz FINISHED! identifying winners...','success'); 
+    toast('Quiz complete! Click ANNOUNCE WINNER.','success'); 
+    renderControl(); 
+    return; 
+  }
+
   
   const curStage = rounds[quiz.currentRoundIdx]?.stage || 'Preliminary';
   const nextStage = rounds[ni]?.stage || 'Preliminary';
@@ -1202,7 +1384,6 @@ function loadSettings(){
 
   document.getElementById('s-captcha').value=s.captchaCode||'';
   document.getElementById('s-q-time').value=s.defaultTimePerQuestion;
-  document.getElementById('s-p-time').value=s.participantTimeLimit;
   document.getElementById('s-overall-time').value=s.overallTimeLimit;
   document.getElementById('s-instructions').value=s.globalInstructions;
   
@@ -1260,7 +1441,208 @@ function adminLogout(){
   const sess = Store.getSession();
   if(sess.rid) Store.updateLogout(sess.rid);
   Store.clearSession();
-  window.location.href='../index.html';
+  window.location.href='/index.html';
+}
+
+function openGuidanceModal(){ openModal('modal-guidance'); }
+
+// ─── AI QUESTION GENERATOR ───────────────────────────────────
+function openAIGenModal(){
+  const rounds = Store.getRounds();
+  const sel = document.getElementById('ai-round');
+  sel.innerHTML = '<option value="">Choose a round...</option>' + 
+    rounds.map((r, i) => `<option value="${i}">R${i+1}: ${r.name}</option>`).join('');
+  
+  document.getElementById('ai-preview-area').classList.add('hidden');
+  document.getElementById('ai-loading').classList.add('hidden');
+  document.getElementById('ai-err').textContent = '';
+  aiGeneratedResults = [];
+  openModal('modal-ai-gen');
+}
+
+async function generateAIQuestions(){
+  const topic = document.getElementById('ai-topic').value.trim();
+  const count = document.getElementById('ai-count').value;
+  const difficulty = document.getElementById('ai-difficulty').value;
+  const err = document.getElementById('ai-err');
+  const btn = document.getElementById('btn-ai-gen');
+  const loader = document.getElementById('ai-loading');
+  const preview = document.getElementById('ai-preview-area');
+  
+  if(!topic){ err.textContent = 'Please enter a topic.'; return; }
+  
+  err.textContent = '';
+  btn.disabled = true;
+  loader.classList.remove('hidden');
+  preview.classList.add('hidden');
+  
+  try {
+    const resp = await fetch('/api/ai/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic, count, difficulty })
+    });
+
+    const contentType = resp.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      throw new Error('Server returned an invalid response. please check your Groq API key.');
+    }
+
+    const res = await resp.json();
+    if(!res.success){ throw new Error(res.message || 'Generation failed'); }
+    
+    aiGeneratedResults = res.questions;
+    renderAIPreview();
+    preview.classList.remove('hidden');
+    // Force scroll to preview
+    setTimeout(() => preview.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+    toast(`Successfully generated ${aiGeneratedResults.length} questions!`,'success');
+  } catch(e) {
+    err.textContent = 'AI Generation Error: ' + e.message;
+    toast('AI Generation Failed','error');
+  } finally {
+    btn.disabled = false;
+    loader.classList.add('hidden');
+  }
+}
+
+function renderAIPreview(){
+  const list = document.getElementById('ai-preview-list');
+  const preview = document.getElementById('ai-preview-area');
+  
+  if(!aiGeneratedResults || !aiGeneratedResults.length){
+    list.innerHTML = '<div class="empty-state">No questions generated. Try a different topic.</div>';
+    return;
+  }
+
+  const diffMap = { 
+    easy: {lbl:'EASY', cls:'badge-green'}, 
+    medium: {lbl:'MEDIUM', cls:'badge-gold'}, 
+    hard: {lbl:'HARD', cls:'badge-red'},
+    "Easy (Recall)": {lbl:'EASY', cls:'badge-green'},
+    "Medium (Applied)": {lbl:'MEDIUM', cls:'badge-gold'},
+    "Hard (Advanced)": {lbl:'HARD', cls:'badge-red'}
+  };
+  
+  list.innerHTML = aiGeneratedResults.map((q, i) => {
+    const dAttr = q.difficulty || document.getElementById('ai-difficulty').value;
+    const d = diffMap[dAttr] || diffMap.medium;
+    return `<div class="ai-q-card" style="display:block !important; visibility:visible !important; opacity:1 !important">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px">
+        <span><span class="ai-q-num">${i+1}</span> <strong style="color:var(--txt)">${q.text}</strong></span>
+        <span class="badge ${d.cls}" style="font-size:9px">${d.lbl}</span>
+      </div>
+      <div class="opts-grid" style="margin-left:28px">
+        ${q.options.map((opt, oi) => `
+          <div class="ai-opt ${q.correct.includes(oi) ? 'correct' : ''}">
+            <strong>${String.fromCharCode(65+oi)}.</strong> ${opt} ${q.correct.includes(oi) ? '✓' : ''}
+          </div>
+        `).join('')}
+      </div>
+      ${q.explanation ? `<div class="ai-expl" style="margin-left:28px; color:var(--muted); font-size:11px">💡 ${q.explanation}</div>` : ''}
+    </div>`;
+  }).join('');
+  preview.classList.remove('hidden');
+}
+
+// ─── BULK ACTIONS ─────────────────────────────────────────────
+function toggleSelectAll(type, checked){
+  document.querySelectorAll(`.chk-${type.slice(0,-1)}`).forEach(c => c.checked = checked);
+  onSelectRow(type);
+}
+
+function onSelectRow(type){
+  const checked = document.querySelectorAll(`.chk-${type.slice(0,-1)}:checked`);
+  const btn = document.getElementById(`btn-${type}-delete-multi`);
+  if(btn) btn.classList.toggle('hidden', checked.length === 0);
+  const allChk = document.getElementById(`chk-${type}-all`);
+  if(allChk) {
+    const total = document.querySelectorAll(`.chk-${type.slice(0,-1)}`).length;
+    allChk.checked = total > 0 && checked.length === total;
+  }
+}
+
+function deleteSelectedRounds(){
+  const checked = [...document.querySelectorAll('.chk-round:checked')].map(c => c.value);
+  if(!checked.length) return;
+  customConfirm(`Delete <strong>${checked.length} selected rounds</strong>?`, '🗑️', () => {
+    Store.saveRounds(Store.getRounds().filter(r => !checked.includes(r.id)));
+    toast('Rounds deleted', 'warning');
+    renderRounds();
+  });
+}
+
+function resetAllRounds(){
+  customConfirm('<strong>Delete ALL rounds</strong> and clear question bank?', '🔄', () => {
+    Store.saveRounds([]);
+    Store.saveQuestions([]);
+    toast('Quiz cleared', 'warning');
+    renderRounds(); renderQuestions();
+  });
+}
+
+function deleteSelectedQuestions(){
+  const checked = [...document.querySelectorAll('.chk-question:checked')].map(c => c.value);
+  if(!checked.length) return;
+  customConfirm(`Delete <strong>${checked.length} selected questions</strong>?`, '🗑️', () => {
+    Store.saveQuestions(Store.getQuestions().filter(q => !checked.includes(q.id)));
+    toast('Questions deleted', 'warning');
+    renderQuestions();
+  });
+}
+
+function resetAllQuestions(){
+  customConfirm('<strong>Delete ALL questions</strong> from the bank?', '🔄', () => {
+    Store.saveQuestions([]);
+    toast('Bank cleared', 'warning');
+    renderQuestions();
+  });
+}
+
+function addAllAIToBank(){
+  const roundIdx = document.getElementById('ai-round').value;
+  const questions = Store.getQuestions();
+  const rounds = Store.getRounds();
+  
+  let insertPos = questions.length;
+  if(roundIdx !== ''){
+    const range = getRoundQRange(rounds, parseInt(roundIdx));
+    insertPos = range.end + 1;
+  }
+  
+  const formatted = aiGeneratedResults.map(q => ({
+    id: 'Q_' + Math.random().toString(36).substr(2, 9).toUpperCase(),
+    text: q.text,
+    options: q.options,
+    correct: q.correct,
+    type: q.correct.length > 1 ? 'multiple' : 'single',
+    explanation: q.explanation || '',
+    difficulty: q.difficulty || document.getElementById('ai-difficulty').value
+  }));
+  
+  questions.splice(insertPos, 0, ...formatted);
+  Store.saveQuestions(questions);
+  
+  toast(`Added ${formatted.length} questions to bank!`, 'success');
+  Store.addActivity(`Added ${formatted.length} AI-generated questions about "${document.getElementById('ai-topic').value}"`, 'success');
+  closeModal('modal-ai-gen');
+  renderQuestions();
+}
+
+// ─── LIVE FEED ────────────────────────────────────────────────
+let feedWindow = null;
+function openLiveFeed(){
+  if(feedWindow && !feedWindow.closed){
+    feedWindow.focus();
+  } else {
+    feedWindow = window.open('/live-feed.html', 'QuizLiveFeed', 'width=1280,height=720');
+  }
+}
+
+function sendToLiveFeed(cmd, data){
+  if(feedWindow && !feedWindow.closed){
+    feedWindow.postMessage({ cmd, data }, '*');
+  }
 }
 
 // ─── INIT + AUTO REFRESH ──────────────────────────────────────
@@ -1452,18 +1834,25 @@ async function saveReportToDB() {
   btn.textContent = 'SAVING...';
 
   try {
+    const sess = Store.getSession();
+    const payload = {
+      ...currentReportData,
+      adminName: sess.name,
+      college: sess.college
+    };
     const resp = await fetch('/api/reports', {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${Store.getToken()}`
       },
-      body: JSON.stringify(currentReportData)
+      body: JSON.stringify(payload)
     });
     const res = await resp.json();
     if (res.success) {
       toast('Report saved to database!', 'success');
       loadSavedReports();
+
     } else {
       toast('Failed to save report: ' + res.message, 'error');
     }
@@ -1658,3 +2047,6 @@ function exportCSV(){
 
 // Update goSection to handle reports (handled now in renderSec)
 // Removed previous override logic
+
+// End of Admin Script
+

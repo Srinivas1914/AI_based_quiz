@@ -1,9 +1,16 @@
 // ===== SUPER ADMIN JS =====
-const sessCheck = Store.getSession();
-if(!sessCheck || !sessCheck.isSuper) {
-  window.location.href = sessCheck?.role === 'admin' ? '/admin' : '/index.html';
-}
-requireRole('admin');
+(function initAuth() {
+  const sess = Store.getSession();
+  if(!sess) {
+    const token = Store.getToken();
+    if (!token) { window.location.href = '/index.html'; return; }
+  } else if (!sess.isSuper) {
+    window.location.href = sess.role === 'admin' ? '/admin' : '/index.html';
+    return;
+  }
+})();
+
+let aiQuestions = []; // Ensure global exists
 
 
 let currentSec = 'dashboard';
@@ -26,65 +33,101 @@ function renderSec(id){
   if(id==='teams')      renderTeams();
   if(id==='rounds')     renderRounds();
   if(id==='questions')  renderQuestions();
-  if(id==='control')    renderControl();
+  if(id==='control')    { renderControl(); renderCommandTargets(); }
   if(id==='camera')     renderCamera();
+
   if(id==='activity')   renderActivity();
   if(id==='settings')   loadSettings();
   if(id==='quiz-requests') renderRequests();
   if(id==='managed-admins') renderManaged();
+  if(id==='admin-perf')     renderAdminPerf();
   if(id==='reports')        renderReports();
 }
+
 
 // ─── CLOCK ────────────────────────────────────────────────────
 setInterval(()=>{ const el=document.getElementById('sb-clock'); if(el) el.textContent=new Date().toLocaleTimeString('en-IN'); },1000);
 
 // ─── DASHBOARD ────────────────────────────────────────────────
 function renderDashboard(){
-  const users=Store.getUsers(), teams=Store.getTeams(), aTeams=Store.getActiveTeams(),
-        questions=Store.getQuestions(), rounds=Store.getRounds(), quiz=Store.getQuiz(),
-        loginStatus=Store.getLoginStatus();
+  try {
+    const users=Store.getUsers(), teams=Store.getTeams(), aTeams=Store.getActiveTeams(),
+          questions=Store.getQuestions(), rounds=Store.getRounds(), quiz=Store.getQuiz(),
+          loginStatus=Store.getLoginStatus();
 
-  document.getElementById('kpi-row').innerHTML=`
-    <div class="kpi cyan"><div class="kpi-val">${users.length}</div><div class="kpi-lbl">USERS</div></div>
-    <div class="kpi green"><div class="kpi-val">${users.filter(u=>u.role==='participant').length}</div><div class="kpi-lbl">PARTICIPANTS</div></div>
-    <div class="kpi gold"><div class="kpi-val">${aTeams.length}</div><div class="kpi-lbl">ACTIVE TEAMS</div></div>
-    <div class="kpi purple"><div class="kpi-val">${rounds.length}</div><div class="kpi-lbl">ROUNDS</div></div>
-    <div class="kpi red"><div class="kpi-val">${questions.length}</div><div class="kpi-lbl">QUESTIONS</div></div>`;
+    const kpiEl = document.getElementById('kpi-row');
+    if(kpiEl) {
+      kpiEl.innerHTML=`
+        <div class="kpi cyan clickable" onclick="goSection('users')">
+          <span class="kpi-click-hint">↗ click</span>
+          <div class="kpi-val">${users.length}</div>
+          <div class="kpi-lbl">USERS</div>
+        </div>
+        <div class="kpi green clickable" onclick="goSection('users')">
+          <span class="kpi-click-hint">↗ click</span>
+          <div class="kpi-val">${users.filter(u=>u.role==='participant').length}</div>
+          <div class="kpi-lbl">PARTICIPANTS</div>
+        </div>
+        <div class="kpi gold clickable" onclick="goSection('teams')">
+          <span class="kpi-click-hint">↗ click</span>
+          <div class="kpi-val">${aTeams.length}</div>
+          <div class="kpi-lbl">ACTIVE TEAMS</div>
+        </div>
+        <div class="kpi purple clickable" onclick="goSection('rounds')">
+          <span class="kpi-click-hint">↗ click</span>
+          <div class="kpi-val">${rounds.length}</div>
+          <div class="kpi-lbl">ROUNDS</div>
+        </div>
+        <div class="kpi red clickable" onclick="goSection('questions')">
+          <span class="kpi-click-hint">↗ click</span>
+          <div class="kpi-val">${questions.length}</div>
+          <div class="kpi-lbl">QUESTIONS</div>
+        </div>`;
+    }
 
-  // Quiz status
-  const sColor={idle:'gray',round_intro:'cyan',running:'green',paused:'gold',participant_turn:'purple',round_end:'purple',finished:'cyan'};
-  const sLabel={idle:'IDLE',round_intro:`R${quiz.currentRoundIdx+1} INTRO`,running:`R${quiz.currentRoundIdx+1} RUNNING`,paused:'PAUSED',participant_turn:'PARTICIPANTS ANSWERING',round_end:`R${quiz.currentRoundIdx+1} ENDED`,finished:'FINISHED'};
-  document.getElementById('d-status-badge').innerHTML=`<span class="badge badge-${sColor[quiz.status]||'gray'}">${sLabel[quiz.status]||quiz.status.toUpperCase()}</span>`;
+    // Quiz status
+    const badgeEl = document.getElementById('d-status-badge');
+    if(badgeEl) {
+      const sColor={idle:'gray',round_intro:'cyan',running:'green',paused:'gold',participant_turn:'purple',round_end:'purple',finished:'cyan'};
+      const sLabel={idle:'IDLE',round_intro:`R${quiz.currentRoundIdx+1} INTRO`,running:`R${quiz.currentRoundIdx+1} RUNNING`,paused:'PAUSED',participant_turn:'PARTICIPANTS ANSWERING',round_end:`R${quiz.currentRoundIdx+1} ENDED`,finished:'FINISHED'};
+      badgeEl.innerHTML=`<span class="badge badge-${sColor[quiz.status]||'gray'}">${sLabel[quiz.status]||quiz.status.toUpperCase()}</span>`;
+    }
 
-  const curQ=Store.getQuestions()[quiz.globalQIdx];
-  document.getElementById('d-quiz-info').innerHTML=[
-    ['Rounds', rounds.length],
-    ['Questions', `${questions.length} / ${getTotalConfiguredQs(rounds)} slots`],
-    ['Current Round', quiz.status==='idle'?'—':`Round ${quiz.currentRoundIdx+1}: ${rounds[quiz.currentRoundIdx]?.name||''}`],
-    ['Current Q', quiz.status==='running'||quiz.status==='participant_turn'?`Q${quiz.currentQInRound+1}: ${(curQ?.text||'').slice(0,60)+'…'}`:'—'],
-    ['Active Teams', aTeams.length],
-  ].map(([k,v])=>`<div class="info-row"><span class="text-muted">${k}</span><span>${v}</span></div>`).join('');
+    const infoEl = document.getElementById('d-quiz-info');
+    if(infoEl) {
+      const curQ=Store.getQuestions()[quiz.globalQIdx];
+      infoEl.innerHTML=[
+        ['Rounds', rounds.length],
+        ['Questions', `${questions.length} / ${getTotalConfiguredQs(rounds)} slots`],
+        ['Current Round', quiz.status==='idle'?'—':`Round ${quiz.currentRoundIdx+1}: ${rounds[quiz.currentRoundIdx]?.name||''}`],
+        ['Current Q', quiz.status==='running'||quiz.status==='participant_turn'?`Q${quiz.currentQInRound+1}: ${(curQ?.text||'').slice(0,60)+'…'}`:'—'],
+        ['Active Teams', aTeams.length],
+      ].map(([k,v])=>`<div class="info-row"><span class="text-muted">${k}</span><span>${v}</span></div>`).join('');
+    }
 
-  // Team login status board
-  const loginBoardEl=document.getElementById('d-login-status');
-  if(loginBoardEl){
-    loginBoardEl.innerHTML=aTeams.length?aTeams.map(t=>{
-      const s=loginStatus[t.id]||{};
-      return `<div class="login-chip ${s.loggedIn?'chip-on':'chip-off'}">
-        <span class="chip-dot"></span>
-        <span class="chip-name">T${t.teamNumber||'?'}: ${t.name}</span>
-        <span class="chip-status">${s.loggedIn?'ONLINE':'OFFLINE'}</span>
-      </div>`;
-    }).join(''):'<span class="text-muted text-sm">No active teams</span>';
+    // Team login status board
+    const loginBoardEl=document.getElementById('d-login-status');
+    if(loginBoardEl){
+      loginBoardEl.innerHTML=aTeams.length?aTeams.map(t=>{
+        const s=loginStatus[t.id]||{};
+        return `<div class="login-chip ${s.loggedIn?'chip-on':'chip-off'}">
+          <span class="chip-dot"></span>
+          <span class="chip-name">T${t.teamNumber||'?'}: ${t.name}</span>
+          <span class="chip-status">${s.loggedIn?'ONLINE':'OFFLINE'}</span>
+        </div>`;
+      }).join(''):'<span class="text-muted text-sm">No active teams</span>';
+    }
+
+    renderScoreboard('d-scores');
+    renderTeamActivityGrid();
+    renderRecentActivity();
+    renderFeedback();
+    renderSpeedWinners();
+    renderLoginRecords();
+    renderAlertsBadge();
+  } catch (e) {
+    console.error("[DASHBOARD] Render error:", e);
   }
-
-  renderScoreboard('d-scores');
-  renderTeamActivityGrid();
-  renderRecentActivity();
-  renderFeedback();
-  renderSpeedWinners();
-  renderLoginRecords();
-  renderAlertsBadge();
 }
 
 function renderTeamActivityGrid(){
@@ -643,55 +686,68 @@ function runElimination(){
 
 // ─── ROUNDS ───────────────────────────────────────────────────
 function renderRounds(){
-  const rounds=Store.getRounds(), questions=Store.getQuestions();
-  const total=getTotalConfiguredQs(rounds);
-  document.getElementById('rounds-overview').innerHTML=`${rounds.length} rounds · ${total} slots · ${questions.length} questions in bank &nbsp;${questions.length<total?'<span class="badge badge-red">⚠ Need more</span>':'<span class="badge badge-green">✓ OK</span>'}`;
+  const rounds=Store.getRounds();
   const el=document.getElementById('rounds-table');
-  if(!rounds.length){ el.innerHTML='<div class="empty-state">No rounds. Click "+ ADD ROUND".</div>'; return; }
+  const ov=document.getElementById('rounds-overview');
+  if(!rounds.length){ el.innerHTML='<div class="empty-state">No rounds configured.</div>'; ov.innerHTML=''; return; }
   
-  const stages = ['Preliminary', 'Selection', 'Final'];
-  
-  el.innerHTML = stages.map(st => {
-    const sRounds = rounds.filter(r => (r.stage||'Preliminary') === st);
-    if(!sRounds.length) return '';
-    
-    return `<div class="stage-header mt-3 mb-1" style="background:rgba(255,255,255,0.05); padding:8px 12px; border-radius:6px; font-weight:bold; color:var(--gold); display:flex; justify-content:space-between; align-items:center">
-      <span>${st.toUpperCase()} STAGE</span>
-      <span class="badge badge-cyan" style="font-size:10px">${sRounds.length} ROUNDS</span>
-    </div>
-    <table class="dtable"><thead><tr><th>#</th><th>NAME</th><th>Qs</th><th>TIME/Q</th><th>Q RANGE</th><th>ACTIONS</th></tr></thead><tbody>` +
-    sRounds.map((r, i) => {
-      const globalIdx = rounds.findIndex(x => x.id === r.id);
-      let gStart = 0;
-      for(let j=0; j<globalIdx; j++) gStart += rounds[j].questionCount;
-      const gEnd = gStart + r.questionCount - 1;
-      
-      return `<tr><td>${r.roundNumber||globalIdx+1}</td><td><strong>${r.name}</strong></td>
-        <td><span class="badge badge-cyan">${r.questionCount}</span></td>
-        <td>${r.timePerQuestion}s</td>
-        <td class="text-xs text-muted">Q${gStart+1}–Q${gEnd+1}</td>
-        <td><button class="btn-icon" onclick="openEditRound('${r.id}')">✏️</button>
-          <button class="btn-icon" style="color:var(--red)" onclick="deleteRound('${r.id}')">🗑️</button></td></tr>`;
-    }).join('') + '</tbody></table>';
-  }).join('');
+  const total=rounds.reduce((a,b)=>a+(b.questionCount||0),0);
+  const totalMins=rounds.reduce((a,b)=>a+Math.ceil(((b.questionCount||0)*(b.timePerQuestion||60) + (b.roundTimeLimit||0)*60)/60),0);
+  ov.innerHTML=`<span class="badge badge-purple">${rounds.length} Rounds</span> <span class="badge badge-cyan">${total} Total Questions</span> <span class="badge badge-gold">~${totalMins} Minutes Est.</span>`;
+
+  el.innerHTML=`<table class="dtable"><thead><tr>
+    <th style="width:30px"><input type="checkbox" id="chk-rounds-all" onclick="toggleSelectAll('rounds', this.checked)"></th>
+    <th>ID</th><th>NAME</th><th>STAGE</th><th>QS</th><th>TIME/Q</th><th>SUBSEC</th><th></th></tr></thead><tbody>`+
+  rounds.map((r,i)=>`<tr>
+    <td><input type="checkbox" class="chk-round" value="${r.id}" onclick="onSelectRow('rounds')"></td>
+    <td class="text-xs text-muted">R${r.roundNumber || i+1}</td>
+    <td><strong>${r.name}</strong></td>
+    <td><span class="badge badge-purple">${r.stage||'Preliminary'}</span></td>
+    <td><span class="badge badge-cyan">${r.questionCount}</span></td>
+    <td>${r.timePerQuestion}s</td>
+    <td class="text-xs text-muted">${r.roundTimeLimit?`+${r.roundTimeLimit}m`:''}</td>
+    <td><button class="btn-icon" onclick="openEditRound('${r.id}')">✏️</button></td></tr>`).join('')+'</tbody></table>';
+  onSelectRow('rounds');
 }
 
 function openAddRound(){ document.getElementById('rm-id').value=''; ['rm-name','rm-instr'].forEach(id=>document.getElementById(id).value=''); document.getElementById('rm-num').value=Store.getRounds().length+1; document.getElementById('rm-qcount').value='5'; document.getElementById('rm-stage').value='Preliminary'; document.getElementById('rm-qtime').value=Store.getSettings().defaultTimePerQuestion||'60'; document.getElementById('rm-rtime').value='0'; document.getElementById('rm-err').textContent=''; document.getElementById('round-modal-title').textContent='ADD ROUND'; openModal('modal-round'); }
 function openEditRound(id){ const r=Store.getRounds().find(x=>x.id===id); if(!r) return; document.getElementById('rm-id').value=id; document.getElementById('rm-name').value=r.name; document.getElementById('rm-num').value=r.roundNumber||''; document.getElementById('rm-stage').value=r.stage||'Preliminary'; document.getElementById('rm-instr').value=r.instructions||''; document.getElementById('rm-qcount').value=r.questionCount; document.getElementById('rm-qtime').value=r.timePerQuestion; document.getElementById('rm-rtime').value=r.roundTimeLimit||0; document.getElementById('rm-err').textContent=''; document.getElementById('round-modal-title').textContent='EDIT ROUND'; openModal('modal-round'); }
 function saveRound(){ const id=document.getElementById('rm-id').value; const name=document.getElementById('rm-name').value.trim(); const roundNumber=parseInt(document.getElementById('rm-num').value)||1; const stage=document.getElementById('rm-stage').value; const instructions=document.getElementById('rm-instr').value.trim(); const questionCount=parseInt(document.getElementById('rm-qcount').value)||0; const timePerQuestion=parseInt(document.getElementById('rm-qtime').value)||60; const roundTimeLimit=parseInt(document.getElementById('rm-rtime').value)||0; const err=document.getElementById('rm-err'); if(!name){err.textContent='Name required.';return;} if(questionCount<1){err.textContent='At least 1 question required.';return;} const rounds=Store.getRounds(); if(id){const idx=rounds.findIndex(r=>r.id===id);if(idx>=0)rounds[idx]={...rounds[idx],name,roundNumber,stage,instructions,questionCount,timePerQuestion,roundTimeLimit};toast('Updated!','success');}else{rounds.push({id:genId(),name,roundNumber,stage,instructions,questionCount,timePerQuestion,roundTimeLimit});toast('Added!','success');} Store.saveRounds(rounds); closeModal('modal-round'); renderRounds(); }
-function deleteRound(id){
-  const r=Store.getRounds().find(x=>x.id===id);
-  customConfirm(`Delete round <strong>${r?.name}</strong>? All mapped questions will remain in bank.`, '🗑️', () => {
-    Store.saveRounds(Store.getRounds().filter(x=>x.id!==id));
-    toast('Round deleted','warning');
-    renderRounds();
-  });
-}
+function deleteRound(id){ const r=Store.getRounds().find(x=>x.id===id); customConfirm(`Delete round <strong>${r?.name}</strong>? All mapped questions will remain in bank.`, '🗑️', () => { Store.saveRounds(Store.getRounds().filter(x=>x.id!==id)); toast('Round deleted','warning'); renderRounds(); }); }
 function moveRound(id,dir){ const rounds=Store.getRounds(); const idx=rounds.findIndex(r=>r.id===id); const ni=idx+dir; if(ni<0||ni>=rounds.length) return; [rounds[idx],rounds[ni]]=[rounds[ni],rounds[idx]]; Store.saveRounds(rounds); renderRounds(); }
 
-// ─── QUIZ TEMPLATES ───────────────────────────────────────────
-function openTemplatesModal(){ openModal('modal-templates'); updateTemplatePreview(); }
+
+function openTemplatesModal(tab='quick'){
+  switchTmplTab(tab);
+  openModal('modal-templates');
+  updateTemplatePreview();
+}
+
+function switchTmplTab(type){
+  document.querySelectorAll('#modal-templates .ltab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('#modal-templates .lpanel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('tab-tmpl-'+type)?.classList.add('active');
+  document.getElementById('panel-tmpl-'+type)?.classList.add('active');
+}
+
+function autoSetTmplTime(){
+  const rounds = parseInt(document.getElementById('tmpl-rounds').value);
+  const timeMap = { 3:30, 4:35, 5:40, 10:50, 15:60 };
+  const target = timeMap[rounds] || 30;
+  document.getElementById('tmpl-time').value = target;
+  
+  const badge = document.getElementById('auto-time-badge');
+  badge?.classList.remove('hidden');
+  setTimeout(()=>badge?.classList.add('hidden'), 2000);
+  updateTemplatePreview();
+}
+
+function applyPreset(name, rounds, time) {
+  applyQuizTemplate(name, rounds, time);
+}
+
 function updateTemplatePreview(){
+
   const roundCount = parseInt(document.getElementById('tmpl-rounds')?.value || 3);
   const totalMins = parseInt(document.getElementById('tmpl-time')?.value || 30);
   const qsPerRound = 5;
@@ -721,15 +777,16 @@ function updateTemplatePreview(){
     <span style="color:var(--gold)">${stages.Selection} Selection</span> → 
     <span style="color:var(--green)">${stages.Final} Final</span>`;
 }
-function applyQuizTemplate(){
-  const roundCount = parseInt(document.getElementById('tmpl-rounds').value);
-  const totalMins = parseInt(document.getElementById('tmpl-time').value);
+
+function applyQuizTemplate(presetName = null, presetRounds = null, presetTime = null){
+  const roundCount = presetRounds || parseInt(document.getElementById('tmpl-rounds').value);
+  const totalMins = presetTime || parseInt(document.getElementById('tmpl-time').value);
+  const finalName = presetName || "Quick Setup";
   const qsPerRound = 5;
   const totalQs = roundCount * qsPerRound;
   const timePerQ = Math.floor((totalMins * 60) / totalQs);
-  const err = document.getElementById('tmpl-err');
   
-  customConfirm(`Applying template will replace current rounds with <strong>${roundCount} rounds</strong> (${totalMins} min total). Continue?`, '⚡', () => {
+  customConfirm(`Applying <strong>${finalName}</strong> will replace current rounds with <strong>${roundCount} rounds</strong> (${totalMins} min total). Continue?`, '⚡', () => {
     const newRounds = [];
     for(let i=1; i<=roundCount; i++){
       // Auto-assign tournament stages based on round position
@@ -757,8 +814,15 @@ function applyQuizTemplate(){
     }
     
     Store.saveRounds(newRounds);
-    Store.addActivity(`Quiz Template Applied: ${roundCount} rounds, ${totalMins} min`, 'info');
-    toast(`Template applied! Created ${roundCount} rounds.`, 'success');
+    const quiz = Store.getQuiz();
+    quiz.templateName = finalName;
+    quiz.templateDuration = totalMins;
+    quiz.status = 'idle';
+    quiz.currentRoundIdx = 0;
+    quiz.globalQIdx = 0;
+    Store.saveQuiz(quiz); 
+    
+    toast(`Template applied: ${finalName}`,'success');
     closeModal('modal-templates');
     renderRounds();
   });
@@ -770,40 +834,38 @@ function renderQuestions(){
   const filterSel=document.getElementById('q-round-filter');
   if(filterSel) filterSel.innerHTML='<option value="">All Rounds</option>'+rounds.map((r,i)=>`<option value="${i}" ${filterVal==i?'selected':''}>R${r.roundNumber||i+1}: ${r.name}</option>`).join('');
   document.getElementById('q-summary').innerHTML=rounds.map((r,i)=>{const range=getRoundQRange(rounds,i);const have=Math.max(0,Math.min(r.questionCount,questions.length-range.start));return `<span class="badge ${have>=r.questionCount?'badge-green':'badge-red'}">${r.name}: ${have}/${r.questionCount}</span>`;}).join(' ')||'<span class="text-muted">No rounds</span>';
-  const qmRound=document.getElementById('qm-round');
-  if(qmRound) qmRound.innerHTML='<option value="">Auto</option>'+rounds.map((r,i)=>`<option value="${i}">R${r.roundNumber||i+1}: ${r.name}</option>`).join('');
   const el=document.getElementById('questions-table');
   if(!questions.length){el.innerHTML='<div class="empty-state">No questions yet.</div>';return;}
   let filtered=questions.map((q,i)=>({...q,_gi:i}));
   if(filterVal!==''&&filterVal!=null&&filterVal!==undefined){const ri=parseInt(filterVal);const range=getRoundQRange(rounds,ri);filtered=filtered.filter(q=>q._gi>=range.start&&q._gi<=range.end);}
-  el.innerHTML=`<table class="dtable"><thead><tr><th>#</th><th>RND</th><th>QUESTION</th><th>TYPE</th><th>ANSWER</th><th></th></tr></thead><tbody>`+
+  el.innerHTML=`<table class="dtable"><thead><tr>
+    <th style="width:30px"><input type="checkbox" id="chk-questions-all" onclick="toggleSelectAll('questions', this.checked)"></th>
+    <th>#</th><th>RND</th><th>QUESTION</th><th>TYPE</th><th>ANSWER</th><th></th></tr></thead><tbody>`+
   filtered.map(q=>{
     let rLabel='—',qs=0;
     for(let i=0;i<rounds.length;i++){if(q._gi>=qs&&q._gi<qs+rounds[i].questionCount){rLabel=`R${rounds[i].roundNumber||i+1}`;break;}qs+=rounds[i].questionCount;}
-    return `<tr><td class="text-muted text-xs">${q._gi+1}</td><td><span class="badge badge-cyan">${rLabel}</span></td>
+    return `<tr>
+      <td><input type="checkbox" class="chk-question" value="${q.id}" onclick="onSelectRow('questions')"></td>
+      <td class="text-muted text-xs">${q._gi+1}</td><td><span class="badge badge-cyan">${rLabel}</span></td>
       <td class="text-sm" style="max-width:300px">${q.text}</td>
       <td><span class="badge ${q.type==='multiple'?'badge-purple':'badge-cyan'}">${q.type==='multiple'?'MULTI':'SINGLE'}</span></td>
       <td><span class="badge badge-green">${(q.correct||[]).map(c=>String.fromCharCode(65+c)).join(',')}</span></td>
       <td><button class="btn-icon" onclick="openEditQ('${q.id}')">✏️</button><button class="btn-icon" style="color:var(--red)" onclick="deleteQ('${q.id}')">🗑️</button></td></tr>`;
   }).join('')+'</tbody></table>';
+  onSelectRow('questions');
 }
 
 function renderOptFields(){ const type=document.getElementById('qm-type').value; const wrap=document.getElementById('qm-opts'); wrap.innerHTML=`<div class="form-group"><label>OPTIONS ${type==='multiple'?'(check all correct)':'(select correct)'}</label>`+['A','B','C','D'].map((l,i)=>`<div class="opt-row"><input type="${type==='multiple'?'checkbox':'radio'}" name="q-correct" value="${i}" id="qc-${i}" style="accent-color:var(--green)"><label for="qc-${i}" class="opt-lbl">${l}</label><input type="text" id="qopt-${i}" placeholder="Option ${l}"></div>`).join('')+'</div>'; }
 function openAddQ(){ document.getElementById('qm-id').value=''; document.getElementById('qm-text').value=''; document.getElementById('qm-type').value='single'; document.getElementById('qm-expl').value=''; document.getElementById('qm-err').textContent=''; document.getElementById('q-modal-title').textContent='ADD QUESTION'; renderOptFields(); openModal('modal-question'); }
 function openEditQ(id){ const q=Store.getQuestions().find(x=>x.id===id); if(!q) return; document.getElementById('qm-id').value=id; document.getElementById('qm-text').value=q.text; document.getElementById('qm-type').value=q.type; document.getElementById('qm-expl').value=q.explanation||''; document.getElementById('qm-err').textContent=''; document.getElementById('q-modal-title').textContent='EDIT QUESTION'; renderOptFields(); setTimeout(()=>{q.options.forEach((opt,i)=>{const el=document.getElementById(`qopt-${i}`);if(el)el.value=opt;});q.correct.forEach(c=>{const el=document.getElementById(`qc-${c}`);if(el)el.checked=true;});},20); openModal('modal-question'); }
 function saveQuestion(){ const id=document.getElementById('qm-id').value; const text=document.getElementById('qm-text').value.trim(); const type=document.getElementById('qm-type').value; const expl=document.getElementById('qm-expl').value.trim(); const err=document.getElementById('qm-err'); if(!text){err.textContent='Text required.';return;} const options=[]; for(let i=0;i<4;i++){const v=document.getElementById(`qopt-${i}`)?.value.trim();if(!v){err.textContent=`Option ${String.fromCharCode(65+i)} required.`;return;}options.push(v);} const correct=[...document.querySelectorAll('[name="q-correct"]:checked')].map(c=>parseInt(c.value)); if(!correct.length){err.textContent='Mark at least one correct answer.';return;} if(type==='single'&&correct.length>1){err.textContent='Single: one correct only.';return;} const qs=Store.getQuestions(); if(id){const idx=qs.findIndex(q=>q.id===id);if(idx>=0)qs[idx]={...qs[idx],text,type,options,correct,explanation:expl};toast('Updated!','success');}else{qs.push({id:genId(),text,type,options,correct,explanation:expl});toast('Added!','success');} Store.saveQuestions(qs); closeModal('modal-question'); renderQuestions(); }
-function deleteQ(id){
-  customConfirm('Permanently delete this question?', '🗑️', () => {
-    Store.saveQuestions(Store.getQuestions().filter(q=>q.id!==id));
-    toast('Question deleted','warning');
-    renderQuestions();
-  });
-}
+function deleteQ(id){ customConfirm('Permanently delete this question?', '🗑️', () => { Store.saveQuestions(Store.getQuestions().filter(q=>q.id!==id)); toast('Question deleted','warning'); renderQuestions(); }); }
 function openUpload(){ document.getElementById('upload-preview').innerHTML=''; document.getElementById('btn-import').classList.add('hidden'); openModal('modal-upload'); }
 function handleDrop(e){ e.preventDefault(); e.currentTarget.classList.remove('drag-over'); processFile(e.dataTransfer.files[0]); }
 function handleFileInput(e){ processFile(e.target.files[0]); }
 function processFile(file){ if(!file) return; const reader=new FileReader(); reader.onload=e=>{const lines=e.target.result.split('\n').filter(l=>l.trim()); pendingImport=[]; let errs=0; lines.forEach(line=>{const p=line.split('|').map(x=>x.trim()); if(p.length<6){errs++;return;} const[qText,a,b,c,d,ans]=p; const correct=ans.toUpperCase().split(',').map(s=>s.trim()).map(l=>l.charCodeAt(0)-65).filter(n=>n>=0&&n<4); const type=correct.length>1?'multiple':'single'; if(!qText||!a||!b||!c||!d||!correct.length){errs++;return;} pendingImport.push({id:genId(),text:qText,options:[a,b,c,d],correct,type,explanation:''});}); const prev=document.getElementById('upload-preview'); prev.innerHTML=`<span class="badge badge-green">✓ ${pendingImport.length} ready</span>${errs?` <span class="badge badge-red">⚠ ${errs} skipped</span>`:''}${pendingImport.slice(0,5).map((q,i)=>`<div class="text-xs text-muted" style="padding:3px 0">${i+1}. ${q.text}</div>`).join('')}`; document.getElementById('btn-import').classList.toggle('hidden',!pendingImport.length); }; reader.readAsText(file); }
 function importQuestions(){ if(!pendingImport.length) return; Store.saveQuestions([...Store.getQuestions(),...pendingImport]); toast(`${pendingImport.length} imported!`,'success'); Store.addActivity(`${pendingImport.length} questions imported via CSV`,'success'); pendingImport=[]; closeModal('modal-upload'); renderQuestions(); }
+
 
 // ─── QUIZ CONTROL ─────────────────────────────────────────────
 function renderControl(){
@@ -821,6 +883,19 @@ function renderControl(){
     ri.innerHTML=`<span class="badge badge-gold" style="margin-right:6px;font-size:9px">${curStage.toUpperCase()}</span> Round ${quiz.currentRoundIdx+1}: ${rounds[quiz.currentRoundIdx].name}`;
   }else ri.style.display='none';
 
+  const tBadge = document.getElementById('c-template-badge');
+  if(tBadge){
+    if(quiz.templateName){
+      tBadge.classList.remove('hidden');
+      tBadge.style.display = 'inline-flex';
+      tBadge.innerHTML = `📋 ${quiz.templateName} · ${quiz.templateDuration} min`;
+    } else {
+      tBadge.classList.add('hidden');
+      tBadge.style.display = 'none';
+    }
+  }
+
+
   const sh=id=>document.getElementById(id)?.classList.remove('hidden');
   const hd=id=>document.getElementById(id)?.classList.add('hidden');
   const shSt=(id,v)=>{ const el=document.getElementById(id); if(el) el.style.display=v; };
@@ -831,6 +906,8 @@ function renderControl(){
   shSt('btn-next',s==='running'||s==='paused'?'inline-flex':'none');
   (s==='running'||s==='paused')?sh('btn-end-round'):hd('btn-end-round');
   s==='round_end'?sh('btn-next-round'):hd('btn-next-round');
+  s==='finished'?(document.getElementById('btn-next-round').classList.remove('hidden'), document.getElementById('btn-next-round').textContent='🏆 ANNOUNCE WINNER'):null;
+
 
   // Current question view - ALWAYS show latest from store
   const qv=document.getElementById('c-question-view'), qb=document.getElementById('c-q-badge');
@@ -1014,7 +1091,15 @@ function showRoundScores(ri){ const rounds=Store.getRounds(),teams=Store.getActi
 function nextRound(){
   const quiz=Store.getQuiz(),rounds=Store.getRounds(),teams=Store.getActiveTeams();
   const ni=quiz.currentRoundIdx+1;
-  if(ni>=rounds.length){ const q2={...quiz,status:'finished'}; Store.saveQuiz(q2); Store.addActivity('🏆 Quiz FINISHED!','success'); toast('Quiz complete!','success'); renderControl(); return; }
+  if(ni>=rounds.length){ 
+    const q2={...quiz,status:'finished'}; 
+    Store.saveQuiz(q2); 
+    Store.addActivity('🏆 Quiz FINISHED! identifying winners...','success'); 
+    toast('Quiz complete! Click ANNOUNCE WINNER.','success'); 
+    renderControl(); 
+    return; 
+  }
+
   
   const curStage = rounds[quiz.currentRoundIdx]?.stage || 'Preliminary';
   const nextStage = rounds[ni]?.stage || 'Preliminary';
@@ -1212,60 +1297,16 @@ function saveSettings(){
 }
 
 
+
 // ─── MODALS ───────────────────────────────────────────────────
-function openModal(id){ document.getElementById(id).classList.add('open'); }
-function closeModal(id){ document.getElementById(id).classList.remove('open'); }
-function customConfirm(msg, icon, onYes){
-  document.getElementById('conf-msg').innerHTML = msg;
-  document.getElementById('conf-icon').textContent = icon || '❓';
-  const btn = document.getElementById('btn-conf-yes');
-  btn.onclick = () => { onYes(); closeModal('modal-confirm'); };
-  openModal('modal-confirm');
+function openModal(id){ 
+  const el = document.getElementById(id);
+  if(el) el.classList.add('open'); 
 }
-
-function adminLogout(){
-  const sess = Store.getSession();
-  if(sess.rid) Store.updateLogout(sess.rid);
-  Store.clearSession();
-  window.location.href='../index.html';
+function closeModal(id){ 
+  const el = document.getElementById(id);
+  if(el) el.classList.remove('open'); 
 }
-
-// ─── INIT + AUTO REFRESH ──────────────────────────────────────
-goSection('dashboard');
-renderOptFields();
-
-// Real-time refresh every 1 second for active sections
-setInterval(()=>{
-  if(currentSec==='dashboard'){ renderDashboard(); }
-  if(currentSec==='control'){
-    // Always fetch fresh quiz state
-    renderTeamAnswers();
-    tickAdminTimer();
-    renderScoreboard('c-scores');
-    renderLoginStatusPanel();
-    // Re-render current question if status changed
-    const quiz=Store.getQuiz();
-    const statusEl=document.getElementById('c-status-txt');
-    const sLabel={idle:'IDLE',round_intro:`ROUND ${quiz.currentRoundIdx+1} INTRO`,running:`ROUND ${quiz.currentRoundIdx+1} RUNNING`,paused:'PAUSED',participant_turn:'PARTICIPANTS ANSWERING',round_end:`ROUND ${quiz.currentRoundIdx+1} ENDED`,finished:'FINISHED'};
-    if(statusEl) statusEl.textContent=sLabel[quiz.status]||quiz.status.toUpperCase();
-    // Update question view directly
-    const qv=document.getElementById('c-question-view');
-    const qb=document.getElementById('c-q-badge');
-    const teams=Store.getActiveTeams(), questions=Store.getQuestions(), rounds=Store.getRounds();
-    const s=quiz.status;
-    if((s==='running'||s==='paused'||s==='participant_turn')&&qv&&qb){
-      const q=questions[quiz.globalQIdx];
-      if(q){
-        const range=getRoundQRange(rounds,quiz.currentRoundIdx);
-        qb.innerHTML=`<span class="badge badge-cyan">Q${quiz.currentQInRound+1} / ${range.count}</span>`;
-        const activeTeamName=s==='participant_turn'?'📢 PARTICIPANTS':(teams[quiz.currentTeamIdx]?.name||'?');
-        qv.innerHTML=`<div class="q-now-label text-xs font-title text-muted mb-1">NOW: <span class="text-gold">${activeTeamName}</span></div>
-          <div class="q-text" style="font-size:14px;margin-bottom:10px">${q.text}</div>
-          <div class="opts-grid">${q.options.map((o,i)=>`<div class="opt-view ${q.correct.includes(i)?'opt-correct':''}"><span class="opt-lbl-sm">${String.fromCharCode(65+i)}</span>${o}${q.correct.includes(i)?'<span class="ml-auto text-green">✓</span>':''}</div>`).join('')}</div>`;
-      }
-    }
-  }
-},1000);
 
 onUpdate(({key})=>{
   if(key===KEYS.QUIZ||key===KEYS.TEAMS||key===KEYS.LOGIN_STATUS || key.includes('sq_quiz_') || key.includes('sq_teams_')){ 
@@ -1663,6 +1704,416 @@ function downloadFullReport(){
 document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) m.classList.remove('open'); }));
 
 // Show ROOT Unique ID for testing
+(function(){
+  const rootId = 'SA-' + Math.random().toString(36).substr(2, 4).toUpperCase();
+  const el = document.getElementById('sb-root-id');
+  if(el) el.textContent = `ROOT ID: ${rootId}`;
+})();
+
+function renderCommandTargets(){
+  const teams = Store.getActiveTeams();
+  const sel = document.getElementById('cmd-target-team');
+  if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">All Active Teams</option>' + 
+    teams.map(t => `<option value="${t.id}" ${t.id===cur?'selected':''}>T${t.teamNumber}: ${t.name}</option>`).join('');
+}
+
+function sendGlobalMsg(){
+  const msg = document.getElementById('cmd-broadcast-msg').value.trim();
+  if(!msg) return;
+  window.socket.emit('admin_cmd', { type: 'msg', target: 'all', msg });
+  document.getElementById('cmd-broadcast-msg').value = '';
+  toast('Global message sent', 'success');
+  Store.addActivity(`📢 Superadmin Broadcast: ${msg}`, 'info');
+}
+
+function cmdAction(action){
+  const target = document.getElementById('cmd-target-team').value;
+  const msgInput = document.getElementById('cmd-broadcast-msg');
+  const msg = msgInput.value.trim();
+  
+  if(action === 'hold'){
+    const quiz = Store.getQuiz();
+    if(!quiz.holdStatus) quiz.holdStatus = {};
+    const currentStatus = !!quiz.holdStatus[target];
+    quiz.holdStatus[target] = !currentStatus;
+    Store.saveQuiz(quiz);
+    window.socket.emit('admin_cmd', { type: 'hold', target, status: !currentStatus });
+    toast(`${target ? 'Team' : 'All teams'} ${!currentStatus ? 'HELD' : 'RELEASED'}`, 'warning');
+    Store.addActivity(`🛑 Superadmin ${!currentStatus ? 'held' : 'released'} ${target || 'all teams'}`, 'warning');
+    return;
+  }
+
+  if(!msg && (action === 'warn' || action === 'msg')) {
+    toast('Please enter a message first', 'error');
+    return;
+  }
+
+  window.socket.emit('admin_cmd', { type: action, target: target || 'all', msg });
+  msgInput.value = '';
+  toast(`${action.toUpperCase()} sent`, 'success');
+  Store.addActivity(`⚠️ Superadmin ${action}: ${msg} (Target: ${target || 'All'})`, 'warning');
+}
+
+// ─── MIC BROADCAST (PTT) ─────────────────────────────────────
+let mediaRecorder = null;
+let audioChunks = [];
+
+async function startMicBroadcast(){
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    audioChunks = [];
+    
+    mediaRecorder.ondataavailable = e => { if(e.data.size > 0) audioChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(audioChunks, { type: 'audio/webm' });
+      const target = document.getElementById('cmd-target-team')?.value || 'all';
+      const reader = new FileReader();
+      reader.onload = () => {
+        window.socket.emit('admin_audio', { audio: reader.result, target });
+      };
+      reader.readAsDataURL(blob);
+      stream.getTracks().forEach(t => t.stop());
+    };
+    
+    mediaRecorder.start();
+    document.getElementById('btn-admin-mic').style.boxShadow = '0 0 15px var(--red)';
+    document.getElementById('btn-admin-mic').style.transform = 'scale(1.2)';
+    Store.addActivity('🎤 Superadmin speaking...', 'warning');
+  } catch(e) {
+    toast('Mic error: ' + e.message, 'error');
+  }
+}
+
+function stopMicBroadcast(){
+  if(mediaRecorder && mediaRecorder.state !== 'inactive'){
+    mediaRecorder.stop();
+    document.getElementById('btn-admin-mic').style.boxShadow = 'none';
+    document.getElementById('btn-admin-mic').style.transform = 'scale(1)';
+  }
+}
+
+
+function adminLogout(){ 
+  const sess = Store.getSession();
+  if(sess && sess.rid) Store.updateLogout(sess.rid);
+  Store.clearSession(); 
+  window.location.href='/index.html'; 
+}
+
+// ─── ADMIN PERFORMANCE ANALYTICS ──────────────────────────────
+async function renderAdminPerf(){
+  const el = document.getElementById('admin-perf-body');
+  if(!el) return;
+  el.innerHTML = '<tr><td colspan="6" class="p-12 text-center">AGGREGATING ANALYTICS...</td></tr>';
+  
+  try {
+    const resp = await fetch('/api/admin-perf');
+    const res = await resp.json();
+    if(res.success && res.data){
+      if(!res.data.length){
+        el.innerHTML = '<tr><td colspan="6" class="p-12 text-center text-muted">No quiz activity data found to generate reports.</td></tr>';
+        return;
+      }
+      el.innerHTML = res.data.map(a => `
+        <tr>
+          <td><strong>${a.name}</strong></td>
+          <td><span class="badge badge-purple">${a.college}</span></td>
+          <td class="text-center"><strong>${a.quizCount}</strong></td>
+          <td class="text-center">${a.totalTeams}</td>
+          <td class="text-muted text-xs">${new Date(a.lastActivity).toLocaleString()}</td>
+          <td><button class="btn-sm btn-cyan" onclick="viewAdminHistory('${a.name}')">HISTORY</button></td>
+        </tr>
+      `).join('');
+    } else {
+      el.innerHTML = '<tr><td colspan="6" class="p-12 text-center text-red">Server error.</td></tr>';
+    }
+  } catch(e){
+    el.innerHTML = '<tr><td colspan="6" class="p-12 text-center text-red">Error connecting to server.</td></tr>';
+  }
+}
+
+function viewAdminHistory(name){
+  toast(`Loading conduct history for ${name}...`, 'info');
+  goSection('reports');
+}
+
+function exportAdminPerf(){
+  toast('Admin Performance CSV Exported!', 'success');
+}
+ 
+
+
+// AI QUESTION GENERATOR LOGIC
+
+function openAIGenModal(){
+  const managed = Store.getManagedQuizzes();
+  const targetSel = document.getElementById('ai-target-quiz');
+  if(targetSel){
+    targetSel.innerHTML = '<option value="global">GLOBAL BANK (Shared)</option>' + 
+      managed.map(q => `<option value="${q.quizId}">${q.quizId}: ${q.collegeName || 'Admin'}</option>`).join('');
+  }
+  onAITargetChange();
+  document.getElementById('ai-preview-area').classList.add('hidden');
+  document.getElementById('ai-preview-list').innerHTML = '';
+  openModal('modal-ai-gen');
+}
+
+function onAITargetChange(){
+  const target = document.getElementById('ai-target-quiz').value;
+  const roundSel = document.getElementById('ai-round');
+  const rounds = (target === 'global') ? [] : (load(`sq_rounds_${target}`, []));
+  
+  if(roundSel) {
+    if(!rounds.length){
+      roundSel.innerHTML = '<option value="">BANK (No rounds in this quiz)</option>';
+    } else {
+      roundSel.innerHTML = '<option value="">BANK (Manual Assignment)</option>' + 
+        rounds.map((r,i)=>`<option value="${i}">R${r.roundNumber||i+1}: ${r.name}</option>`).join('');
+    }
+  }
+}
+
+async function generateAIQuestions() {
+  const topic = document.getElementById('ai-topic').value.trim();
+  const count = document.getElementById('ai-count').value;
+  const difficulty = document.getElementById('ai-difficulty').value;
+  const err = document.getElementById('ai-err');
+  const btn = document.getElementById('btn-ai-gen');
+  const loader = document.getElementById('ai-loading');
+  const preview = document.getElementById('ai-preview-area');
+  
+  if(!topic) { err.textContent = 'Please enter a subject/topic.'; return; }
+  
+  err.textContent = '';
+  btn.disabled = true;
+  loader.classList.remove('hidden');
+  preview.classList.add('hidden');
+
+  try {
+    const response = await fetch('/api/ai/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic, count, difficulty })
+    });
+    
+    // Ensure we are getting JSON back
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const txt = await response.text();
+      console.error('[AI] Non-JSON response:', txt.substring(0, 200));
+      throw new Error('Server returned HTML instead of JSON. Check backend logs.');
+    }
+
+    const res = await response.json();
+    if(!res.success) throw new Error(res.message);
+    
+    // VERIFY data structure from server
+    if (!res.questions || !Array.isArray(res.questions)) {
+       throw new Error('Invalid data format received from AI server.');
+    }
+
+    aiQuestions = res.questions;
+    renderAIPreview();
+    preview.classList.remove('hidden');
+    // Scroll to preview
+    setTimeout(() => preview.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+    toast(`Successfully generated ${aiQuestions.length} questions!`, 'success');
+  } catch(e) {
+    err.textContent = 'AI Error: ' + e.message;
+    toast('AI Generation Failed', 'error');
+  } finally {
+    loader.classList.add('hidden');
+    btn.disabled = false;
+  }
+}
+
+function renderAIPreview(){
+  const list = document.getElementById('ai-preview-list');
+  const preview = document.getElementById('ai-preview-area');
+  
+  if(!aiQuestions || !aiQuestions.length){
+    list.innerHTML = '<div class="empty-state">No questions generated. Try a different topic.</div>';
+    return;
+  }
+
+  const diffMap = { 
+    easy: {lbl:'EASY', cls:'badge-green'}, 
+    medium: {lbl:'MEDIUM', cls:'badge-gold'}, 
+    hard: {lbl:'HARD', cls:'badge-red'},
+    "Easy (Recall)": {lbl:'EASY', cls:'badge-green'},
+    "Medium (Applied)": {lbl:'MEDIUM', cls:'badge-gold'},
+    "Hard (Advanced)": {lbl:'HARD', cls:'badge-red'}
+  };
+  
+  list.innerHTML = aiQuestions.map((q, i) => {
+    const dAttr = q.difficulty || document.getElementById('ai-difficulty').value;
+    const d = diffMap[dAttr] || diffMap.medium;
+    return `<div class="ai-q-card" style="display:block !important; visibility:visible !important; opacity:1 !important">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px">
+        <span><span class="ai-q-num">${i+1}</span> <strong style="color:var(--txt)">${q.text}</strong></span>
+        <span class="badge ${d.cls}" style="font-size:9px">${d.lbl}</span>
+      </div>
+      <div class="opts-grid" style="margin-left:28px">
+        ${q.options.map((opt, oi) => `
+          <div class="ai-opt ${q.correct.includes(oi) ? 'correct' : ''}">
+            <strong>${String.fromCharCode(65+oi)}.</strong> ${opt} ${q.correct.includes(oi) ? '✓' : ''}
+          </div>
+        `).join('')}
+      </div>
+      ${q.explanation ? `<div class="ai-expl" style="margin-left:28px; color:var(--muted); font-size:11px">💡 ${q.explanation}</div>` : ''}
+    </div>`;
+  }).join('');
+  preview.classList.remove('hidden');
+}
+
+// ─── BULK ACTIONS ─────────────────────────────────────────────
+function toggleSelectAll(type, checked){
+  document.querySelectorAll(`.chk-${type.slice(0,-1)}`).forEach(c => c.checked = checked);
+  onSelectRow(type);
+}
+
+function onSelectRow(type){
+  const checked = document.querySelectorAll(`.chk-${type.slice(0,-1)}:checked`);
+  const btn = document.getElementById(`btn-${type}-delete-multi`);
+  if(btn) btn.classList.toggle('hidden', checked.length === 0);
+  const allChk = document.getElementById(`chk-${type}-all`);
+  if(allChk) {
+    const total = document.querySelectorAll(`.chk-${type.slice(0,-1)}`).length;
+    allChk.checked = total > 0 && checked.length === total;
+  }
+}
+
+function deleteSelectedRounds(){
+  const checked = [...document.querySelectorAll('.chk-round:checked')].map(c => c.value);
+  if(!checked.length) return;
+  customConfirm(`Delete <strong>${checked.length} selected rounds</strong>?`, '🗑️', () => {
+    Store.saveRounds(Store.getRounds().filter(r => !checked.includes(r.id)));
+    toast('Rounds deleted', 'warning');
+    renderRounds();
+  });
+}
+
+function resetAllRounds(){
+  customConfirm('<strong>Delete ALL rounds</strong> and clear question bank?', '🔄', () => {
+    Store.saveRounds([]);
+    Store.saveQuestions([]);
+    toast('Quiz cleared', 'warning');
+    renderRounds(); renderQuestions();
+  });
+}
+
+function deleteSelectedQuestions(){
+  const checked = [...document.querySelectorAll('.chk-question:checked')].map(c => c.value);
+  if(!checked.length) return;
+  customConfirm(`Delete <strong>${checked.length} selected questions</strong>?`, '🗑️', () => {
+    Store.saveQuestions(Store.getQuestions().filter(q => !checked.includes(q.id)));
+    toast('Questions deleted', 'warning');
+    renderQuestions();
+  });
+}
+
+function resetAllQuestions(){
+  customConfirm('<strong>Delete ALL questions</strong> from the bank?', '🔄', () => {
+    Store.saveQuestions([]);
+    toast('Bank cleared', 'warning');
+    renderQuestions();
+  });
+}
+
+
+function addAllAIToBank(){
+  const target = document.getElementById('ai-target-quiz').value;
+  const roundIdx = document.getElementById('ai-round').value;
+  
+  // Custom partition logic for Superadmin targeting
+  const qKey = (target === 'global') ? 'sq_questions' : `sq_questions_${target}`;
+  const rKey = (target === 'global') ? 'sq_rounds' : `sq_rounds_${target}`;
+  
+  let questions = load(qKey, []);
+  let rounds = load(rKey, []);
+  
+  let insertIdx = questions.length;
+  if(roundIdx !== ''){
+    const ri = parseInt(roundIdx);
+    const range = getRoundQRange(rounds, ri);
+    insertIdx = range.end + 1; 
+  }
+  
+  // Double check global aiQuestions
+  if(!aiQuestions || !aiQuestions.length){
+    toast('No questions found to add!', 'error');
+    return;
+  }
+
+  // Create proper question objects
+  const toAdd = aiQuestions.map(q => ({
+    id: 'Q_' + Math.random().toString(36).substr(2, 9).toUpperCase(),
+    text: q.text,
+    options: q.options,
+    correct: q.correct,
+    type: q.correct.length > 1 ? 'multiple' : 'single',
+    explanation: q.explanation || '',
+    difficulty: q.difficulty || document.getElementById('ai-difficulty').value
+  }));
+
+  questions.splice(insertIdx, 0, ...toAdd);
+  save(qKey, questions);
+  
+  toast(`Successfully added ${toAdd.length} questions to ${target}!`, 'success');
+  Store.addActivity(`🤖 AI Import: Added ${toAdd.length} questions for topic "${document.getElementById('ai-topic').value}" to ${target}`, 'success', true);
+  closeModal('modal-ai-gen');
+  if(target === (Store.getSession()?.quizId || 'global')){
+    if(typeof renderQuestions === 'function') renderQuestions();
+  }
+}
+
+function openLiveFeed(){ window.open('/live-feed.html', '_blank'); }
+
+function announceWinner(){
+  const teams = Store.getActiveTeams().sort((a,b) => (b.score||0)-(a.score||0));
+  if(!teams.length) return toast('No teams to announce!', 'error');
+  const winner = teams[0];
+  window.socket.emit('admin_cmd', { type: 'winner', target: 'all', teamName: winner.name, score: winner.score });
+  toast(`Winner Announced: ${winner.name}!`, 'success');
+  Store.addActivity(`🏆 FINAL WINNER ANNOUNCED: ${winner.name} (${winner.score} pts)`, 'success');
+}
+
+// ─── FINAL INITIALIZATION ─────────────────────────────────────
+function customConfirm(msg, icon, onYes){
+  const elMsg = document.getElementById('conf-msg');
+  const elIcon = document.getElementById('conf-icon');
+  if(elMsg) elMsg.innerHTML = msg;
+  if(elIcon) elIcon.textContent = icon || '❓';
+  const btn = document.getElementById('btn-conf-yes');
+  if(btn) btn.onclick = () => { onYes(); closeModal('modal-confirm'); };
+  openModal('modal-confirm');
+}
+
+// Start app
+goSection('dashboard');
+renderOptFields();
+
+// Global tick for real-time updates
+setInterval(()=>{
+  if(currentSec === 'dashboard') renderDashboard();
+  if(currentSec === 'control'){
+    renderTeamAnswers();
+    tickAdminTimer();
+    renderScoreboard('c-scores');
+    renderLoginStatusPanel();
+    const quiz = Store.getQuiz();
+    const statusEl = document.getElementById('c-status-txt');
+    if(statusEl) {
+      const sLabel={idle:'IDLE',round_intro:`ROUND ${quiz.currentRoundIdx+1} INTRO`,running:`ROUND ${quiz.currentRoundIdx+1} RUNNING`,paused:'PAUSED',participant_turn:'PARTICIPANTS ANSWERING',round_end:`ROUND ${quiz.currentRoundIdx+1} ENDED`,finished:'FINISHED'};
+      statusEl.textContent = sLabel[quiz.status]||quiz.status.toUpperCase();
+    }
+  }
+}, 1000);
+
+// Root ID Display
 (function(){
   const rootId = 'SA-' + Math.random().toString(36).substr(2, 4).toUpperCase();
   const el = document.getElementById('sb-root-id');

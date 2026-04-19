@@ -5,10 +5,10 @@ if (typeof io !== 'undefined') {
   socket = io({
     auth: { token }
   });
+  window.socket = socket;
   socket.on('sync', (data) => {
-    // VERSION CHECK: Only apply sync if it's newer than what we have
     const localTs = parseInt(localStorage.getItem(`_ts_${data.key}`) || '0');
-    if (data._ts && data._ts < localTs) return; // Ignore older broadcast
+    if (data._ts && data._ts < localTs) return; 
     
     localStorage.setItem(data.key, data.val);
     if(data._ts) localStorage.setItem(`_ts_${data.key}`, data._ts);
@@ -105,9 +105,16 @@ function save(key, val){
 
 function getPKey(key) {
   const s = Store.getSession();
-  if (!s || !s.quizId) return key;
-  // Global keys that shouldn't be partitioned
-  if ([KEYS.SESSION, KEYS.USERS, KEYS.LOGIN_HISTORY, KEYS.QUIZ_REQUESTS, KEYS.MANAGED_QUIZZES].includes(key)) return key;
+  // Global keys that should NEVER be partitioned
+  if ([KEYS.SESSION, KEYS.USERS, KEYS.LOGIN_HISTORY, KEYS.QUIZ_REQUESTS, KEYS.MANAGED_QUIZZES, KEYS.SETTINGS].includes(key)) return key;
+  
+  if (!s || !s.quizId) {
+    // If no quizId, but we are a normal admin, this is a state error
+    if (s && s.role === 'admin' && !s.isSuper) {
+       console.warn(`[STORAGE] Partitioning key ${key} without quizId in session!`);
+    }
+    return key;
+  }
   return `${key}_${s.quizId}`;
 }
 
@@ -205,12 +212,12 @@ const Store = {
 
   // Camera frames (base64 JPEG per team)
   saveCamFrame(teamId, base64){
-    const key = getPKey(KEYS.CAM_PREFIX+teamId);
+    const key = KEYS.CAM_PREFIX+teamId; // Global key for cameras
     localStorage.setItem(key, base64);
     if(socket && socket.connected) socket.emit('sync', { key: key, val: base64 });
   },
-  getCamFrame(teamId){ return localStorage.getItem(getPKey(KEYS.CAM_PREFIX+teamId))||null; },
-  clearCamFrame(teamId){ localStorage.removeItem(getPKey(KEYS.CAM_PREFIX+teamId)); },
+  getCamFrame(teamId){ return localStorage.getItem(KEYS.CAM_PREFIX+teamId)||null; },
+  clearCamFrame(teamId){ localStorage.removeItem(KEYS.CAM_PREFIX+teamId); },
 
   // Camera status (tab visibility, suspicious flags)
   getCamStatus(){ return load(getPKey(KEYS.CAM_STATUS), {}); },
@@ -337,7 +344,7 @@ const Store = {
 if (socket) {
   socket.on('connect', () => {
     const s = Store.getSession();
-    if(s && s.role === 'admin') Store.pushToBackend();
+    if(s && (s.role === 'admin' || s.isSuper)) Store.pushToBackend();
   });
 }
 

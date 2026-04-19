@@ -239,10 +239,13 @@ textarea, input, select, button { font-family: var(--font-main); }
 /* ===== KPI CARDS ===== */
 .kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:15px;}
 @media(max-width:1100px){.kpi-row{grid-template-columns:repeat(3,1fr);}}
-.kpi{background:white;border:none;border-radius:var(--border-radius);padding:15px 12px;text-align:center;box-shadow:var(--shadow-soft);transition:transform 0.2s ease;}
-.kpi:hover { transform: translateY(-3px); }
-.kpi-val{font-size:24px;font-weight:800;color:var(--text-main);line-height:1.1;}
-.kpi-lbl{font-size:9px;font-weight:800;letter-spacing:0.8px;color:var(--text-muted);text-transform:uppercase;margin-top:4px;}
+.kpi{background:white;border:none;border-radius:var(--border-radius);padding:15px 12px;text-align:center;box-shadow:var(--shadow-soft);transition:all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);cursor:pointer;position:relative;overflow:hidden;}
+.kpi:hover { transform: translateY(-5px); box-shadow: var(--shadow-heavy); border-bottom: 3px solid var(--primary); }
+.kpi-click-hint { position: absolute; top: 5px; right: 8px; font-size: 8px; font-weight: 800; color: var(--primary); opacity: 0; transition: opacity 0.2s; letter-spacing: 0.5px; }
+.kpi:hover .kpi-click-hint { opacity: 1; }
+.kpi-val{font-size:26px;font-weight:900;color:var(--text-main);line-height:1.1;}
+.kpi-lbl{font-size:10px;font-weight:800;letter-spacing:1px;color:var(--text-muted);text-transform:uppercase;margin-top:4px;}
+
 .dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px;}
 
 /* ===== TEAM ACTIVITY ===== */

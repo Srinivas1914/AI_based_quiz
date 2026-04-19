@@ -6,6 +6,18 @@
 <title>Admin — SACET Quiz</title>
 <link rel="stylesheet" href="/css/style.css">
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  /* AI Question Preview */
+  .ai-q-card { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 10px; text-align: left; }
+  .ai-q-num { background: var(--primary); color: white; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 10px; margin-right: 8px; font-weight: 800; }
+  .ai-opt { padding: 6px 10px; border-radius: 6px; margin-top: 4px; font-size: 12px; border: 1px solid transparent; }
+  .ai-opt.correct { background: rgba(34,197,94,0.15); border-color: #22c55e; color: #22c55e; font-weight: 600; }
+  .ai-expl { font-style: italic; color: var(--muted); font-size: 11px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+  
+  /* KPI Clickable Styles */
+  .kpi.clickable { cursor: pointer; position: relative; transition: all 0.2s ease; overflow: hidden; }
+  .kpi.clickable:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0,0,0,0.3); border-color: rgba(255,255,255,0.2); }
+</style>
 </head>
 <body>
 <div class="bg-grid"></div>
@@ -18,7 +30,13 @@
       <div class="sb-logo">QUIZ</div>
       <div class="sb-sub">SUPER PANEL</div>
       <div id="sb-root-id" style="margin-top:10px; padding:4px 8px; background:rgba(255,51,102,0.1); border:1px solid var(--red); border-radius:4px; font-family:var(--font-t); font-size:10px; color:var(--red); display:block">ROOT ID: SA-999</div>
+      <div style="display:flex; gap:8px; margin-top:10px">
+        <button class="btn-sm btn-cyan" style="height:40px; flex:1" onclick="openLiveFeed()">📺 LIVE FEED</button>
+        <button id="btn-admin-mic" class="btn-sm btn-red" style="height:40px; width:40px; border-radius:50%; padding:0" onmousedown="startMicBroadcast()" onmouseup="stopMicBroadcast()" ontouchstart="startMicBroadcast()" ontouchend="stopMicBroadcast()" title="Hold to speak to teams">🎤</button>
+      </div>
     </div>
+
+
     <nav class="sb-nav">
       <div class="nav-item active" data-sec="dashboard" onclick="goSection('dashboard')"><i>📊</i><span>Dashboard</span></div>
       <div class="nav-item" data-sec="users" onclick="goSection('users')"><i>👤</i><span>Users</span></div>
@@ -30,12 +48,17 @@
       <div class="nav-item" data-sec="activity" onclick="goSection('activity')"><i>📜</i><span>Activity</span></div>
       <div class="nav-item" data-sec="quiz-requests" onclick="goSection('quiz-requests')"><i>📨</i><span>Quiz Requests <span id="req-alert-badge" class="badge badge-gold hidden" style="font-size:8px;padding:1px 5px">0</span></span></div>
       <div class="nav-item" data-sec="managed-admins" onclick="goSection('managed-admins')"><i>🎓</i><span>Managed Admins</span></div>
+      <div class="nav-item" data-sec="admin-perf" onclick="goSection('admin-perf')"><i>📈</i><span>Admin Performance</span></div>
       <div class="nav-item" data-sec="reports" onclick="goSection('reports')"><i>📋</i><span>Quiz Reports</span></div>
+
       <div class="nav-item" data-sec="settings" onclick="goSection('settings')"><i>⚙️</i><span>Settings</span></div>
     </nav>
     <div class="sb-foot">
       <div class="sb-clock" id="sb-clock"></div>
-      <button class="btn-sm btn-red full-w" onclick="adminLogout()">LOGOUT</button>
+      <div style="display:flex; gap:8px;">
+        <button class="btn-sm btn-gold" style="flex:1" onclick="window.location.reload()">🔄 REFRESH</button>
+        <button class="btn-sm btn-red" style="flex:1" onclick="adminLogout()">LOGOUT</button>
+      </div>
     </div>
   </aside>
 
@@ -46,6 +69,7 @@
     <section class="sec" id="sec-dashboard">
       <div class="sec-head"><h2>DASHBOARD</h2></div>
       <div class="kpi-row" id="kpi-row"></div>
+
       <div class="dash-grid">
         <div class="card">
           <div class="card-head"><span class="card-title">QUIZ STATUS</span><span id="d-status-badge"></span></div>
@@ -112,10 +136,14 @@
       <div class="sec-head">
         <h2>ROUND MANAGEMENT</h2>
         <div style="display:flex; gap:8px">
-          <button class="btn-sm btn-gold" onclick="openTemplatesModal()">⚡ QUICK TEMPLATES</button>
+          <button class="btn-sm btn-gold" onclick="openTemplatesModal('gate')">🏛️ TEMPLATE GATE</button>
+          <button class="btn-sm btn-cyan" onclick="openTemplatesModal('quick')">⚡ QUICK TEMPLATES</button>
+          <button id="btn-rounds-delete-multi" class="btn-sm btn-red hidden" onclick="deleteSelectedRounds()">🗑️ DELETE SELECTED</button>
+          <button class="btn-sm btn-red" onclick="resetAllRounds()">🔄 RESET ALL</button>
           <button class="btn-sm btn-cyan" onclick="openAddRound()">+ ADD ROUND</button>
         </div>
       </div>
+
       <div class="card mb-2"><div class="card-head"><span class="card-title">OVERVIEW</span></div><div id="rounds-overview" class="p-12 text-sm text-muted"></div></div>
       <div class="card"><div id="rounds-table"></div></div>
     </section>
@@ -125,10 +153,14 @@
       <div class="sec-head"><h2>QUESTION BANK</h2>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <select id="q-round-filter" class="filter-select" onchange="renderQuestions()"><option value="">All Rounds</option></select>
+          <button class="btn-sm btn-purple" onclick="openAIGenModal()">🤖 AI GENERATE</button>
           <button class="btn-sm btn-gold" onclick="openUpload()">📎 UPLOAD CSV</button>
+          <button id="btn-questions-delete-multi" class="btn-sm btn-red hidden" onclick="deleteSelectedQuestions()">🗑️ DELETE SELECTED</button>
+          <button class="btn-sm btn-red" onclick="resetAllQuestions()">🔄 RESET ALL</button>
           <button class="btn-sm btn-cyan" onclick="openAddQ()">+ ADD QUESTION</button>
         </div>
       </div>
+
       <div class="card mb-2"><div id="q-summary" class="p-12 text-sm"></div></div>
       <div class="card"><div id="questions-table"></div></div>
     </section>
@@ -138,17 +170,20 @@
       <div class="sec-head"><h2>QUIZ CONTROL</h2></div>
       <div class="ctrl-bar">
         <div class="status-pill"><span class="sdot" id="c-dot"></span><span class="font-title text-xs" id="c-status-txt">IDLE</span></div>
-        <span id="c-round-info" class="badge badge-purple" style="display:none"></span>
+        <span id="c-template-badge" class="badge badge-purple hidden" style="background:rgba(163, 73, 229, 0.1); border:1px solid var(--primary); color:var(--primary); margin-left:10px; font-size:9px"></span>
+        <span id="c-round-info" class="badge badge-cyan" style="display:none; margin-left:5px"></span>
         <div style="flex:1"></div>
+        <button class="btn-sm btn-purple" onclick="openTemplatesModal()" style="margin-right:6px">📋 TEMPLATES</button>
         <button class="btn-sm btn-green" id="btn-start" onclick="quizStart()">▶ START</button>
         <button class="btn-sm btn-cyan hidden" id="btn-begin" onclick="beginRound()">▶ BEGIN ROUND</button>
         <button class="btn-sm btn-gold hidden" id="btn-pause" onclick="quizPause()">⏸ PAUSE</button>
         <button class="btn-sm btn-cyan hidden" id="btn-resume" onclick="quizResume()">▶ RESUME</button>
         <button class="btn-sm hidden" id="btn-next" onclick="quizNext()">⏭ NEXT Q</button>
         <button class="btn-sm btn-red hidden" id="btn-end-round" onclick="endRound()">🏁 END ROUND</button>
-        <button class="btn-sm btn-green hidden" id="btn-next-round" onclick="nextRound()">▶ NEXT ROUND</button>
-        <button class="btn-sm btn-red" onclick="quizReset()" style="margin-left:6px">🔄 RESET</button>
+        <button class="btn-sm btn-red" id="btn-next-round" onclick="announceWinner()" style="margin-right:6px">🏆 ANNOUNCE WINNER</button>
+        <button class="btn-sm btn-red" onclick="quizReset()">🔄 RESET</button>
       </div>
+
 
       <div class="ctrl-grid">
         <div class="ctrl-main">
@@ -175,7 +210,25 @@
           </div>
         </div>
         <div class="ctrl-side">
+          <div class="card" style="border-color:var(--gold)">
+            <div class="card-head" style="background:rgba(255,215,0,0.1)"><span class="card-title" style="color:var(--gold)">🚨 AD-HOC COMMANDS</span></div>
+            <div style="padding:14px; display:flex; flex-direction:column; gap:8px">
+              <div style="display:flex;gap:5px">
+                <input type="text" id="cmd-broadcast-msg" placeholder="Message to all teams..." style="flex:1">
+                <button class="btn-sm btn-gold" onclick="sendGlobalMsg()">📢 SEND</button>
+              </div>
+              <div class="divider" style="margin:5px 0"></div>
+              <div class="text-xs text-muted mb-1">TEAM-SPECIFIC CONTROL</div>
+              <select id="cmd-target-team" class="full-w mb-1"><option value="">Select Team...</option></select>
+              <div style="display:flex; gap:5px">
+                <button class="btn-sm btn-red" style="flex:1" onclick="cmdAction('warn')">⚠️ WARN</button>
+                <button class="btn-sm btn-purple" style="flex:1" id="btn-cmd-hold" onclick="cmdAction('hold')">🛑 HOLD</button>
+                <button class="btn-sm btn-cyan" style="flex:1" onclick="cmdAction('msg')">💬 MSG</button>
+              </div>
+            </div>
+          </div>
           <div class="card">
+
             <div class="card-head"><span class="card-title">QUESTION TIMER</span></div>
             <div style="padding:10px 14px">
               <div class="timer-big" id="c-timer">—</div>
@@ -261,6 +314,32 @@
         </div>
       </div>
     </section>
+    
+    <!-- ADMIN PERFORMANCE ANALYTICS -->
+    <section class="sec hidden" id="sec-admin-perf">
+      <div class="sec-head"><h2>ADMIN CONDUCT ANALYTICS</h2><button class="btn-sm btn-cyan" onclick="exportAdminPerf()">EXPORT REPORT</button></div>
+      <div class="dash-grid">
+        <div class="card" style="flex:1">
+          <div class="card-head"><span class="card-title">CONDUCT SUMMARY PER ADMIN</span></div>
+          <div id="admin-perf-table-wrap">
+            <table class="dtable">
+              <thead>
+                <tr>
+                  <th>ADMIN NAME</th>
+                  <th>COLLEGE</th>
+                  <th>QUIZZES</th>
+                  <th>TOTAL TEAMS</th>
+                  <th>LAST ACTIVITY</th>
+                  <th>ACTION</th>
+                </tr>
+              </thead>
+              <tbody id="admin-perf-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
 
     <!-- SETTINGS -->
     <section class="sec hidden" id="sec-settings">
@@ -338,6 +417,144 @@
 </div>
 
 <!-- QUICK TEMPLATES MODAL -->
+<div class="modal-bg" id="modal-templates">
+  <div class="modal" style="max-width:620px">
+    <div class="modal-head">
+      <h3>TEMPLATE MANAGEMENT</h3>
+      <button class="modal-x" onclick="closeModal('modal-templates')">&times;</button>
+    </div>
+    
+    <div class="login-tabs mb-2">
+      <button class="ltab active" id="tab-tmpl-quick" onclick="switchTmplTab('quick')">⚡ QUICK SETUP</button>
+      <button class="ltab" id="tab-tmpl-gate" onclick="switchTmplTab('gate')">🏛️ TEMPLATE GATE</button>
+    </div>
+
+    <div id="panel-tmpl-quick" class="lpanel active">
+      <div class="frow">
+        <div class="form-group">
+          <label>NUMBER OF ROUNDS</label>
+          <select id="tmpl-rounds" onchange="autoSetTmplTime(); updateTemplatePreview()">
+            <option value="3">3 Rounds</option>
+            <option value="4">4 Rounds</option>
+            <option value="5">5 Rounds</option>
+            <option value="10">10 Rounds (Marathon)</option>
+            <option value="15">15 Rounds (Tournament)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>TOTAL DURATION (MIN) <span id="auto-time-badge" class="badge badge-gold hidden" style="font-size:7px; vertical-align:middle; margin-left:5px">AUTO-SET</span></label>
+          <input type="number" id="tmpl-time" value="30" min="5" max="180" onchange="updateTemplatePreview()">
+        </div>
+      </div>
+      <div id="tmpl-preview" class="suc-msg mb-2"></div>
+      <div id="tmpl-err" class="err-msg"></div>
+      <button class="btn-main btn-cyan" onclick="applyQuizTemplate()">APPLY CUSTOM SETUP</button>
+    </div>
+
+    <div id="panel-tmpl-gate" class="lpanel">
+      <div class="preset-grid">
+        <div class="preset-card" onclick="applyPreset('Classroom Quiz', 3, 15, 5)">
+          <div class="p-title">Classroom Quiz <span>🎓</span></div>
+          <div class="p-meta">
+            <span>🔄 3 Rounds</span>
+            <span>⏱ 15 Minutes</span>
+            <span>❓ 5 Q / Round</span>
+          </div>
+        </div>
+        <div class="preset-card" onclick="applyPreset('Department Level', 5, 30, 5)">
+          <div class="p-title">Department Level <span>🏢</span></div>
+          <div class="p-meta">
+            <span>🔄 5 Rounds</span>
+            <span>⏱ 30 Minutes</span>
+            <span>❓ 5 Q / Round</span>
+          </div>
+        </div>
+        <div class="preset-card" onclick="applyPreset('College Tournament', 10, 45, 5)">
+          <div class="p-title">College Tournament <span>🏆</span></div>
+          <div class="p-meta">
+            <span>🔄 10 Rounds</span>
+            <span>⏱ 45 Minutes</span>
+            <span>❓ 5 Q / Round</span>
+          </div>
+        </div>
+        <div class="preset-card" onclick="applyPreset('Inter-College', 15, 60, 5)">
+          <div class="p-title">Inter-College <span>🌎</span></div>
+          <div class="p-meta">
+            <span>🔄 15 Rounds</span>
+            <span>⏱ 60 Minutes</span>
+            <span>❓ 5 Q / Round</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- AI QUESTION GENERATOR MODAL -->
+<div class="modal-bg" id="modal-ai-gen">
+  <div class="modal" style="max-width:700px">
+    <div class="modal-head">
+      <h3>🤖 AI QUESTION GENERATOR</h3>
+      <button class="modal-x" onclick="closeModal('modal-ai-gen')">&times;</button>
+    </div>
+    <div class="frow">
+      <div class="form-group">
+        <label>SUBJECT / TOPIC</label>
+        <input type="text" id="ai-topic" placeholder="e.g. Thermodynamics, Data Structures">
+      </div>
+      <div class="form-group">
+        <label>COUNT</label>
+        <select id="ai-count">
+          <option value="5">5 Questions</option>
+          <option value="10">10 Questions</option>
+          <option value="15">15 Questions</option>
+          <option value="20">20 Questions</option>
+        </select>
+      </div>
+    </div>
+    <div class="frow">
+      <div class="form-group">
+        <label>DIFFICULTY</label>
+        <select id="ai-difficulty">
+          <option value="easy">Easy (Recall)</option>
+          <option value="medium" selected>Medium (Applied)</option>
+          <option value="hard">Hard (Advanced)</option>
+          <option value="mixed">Mixed (All Levels)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>ASSIGN TO ROUND</label>
+        <select id="ai-round">
+          <option value="">BANK (Manual Assignment)</option>
+        </select>
+      </div>
+    </div>
+    <div class="frow">
+      <div class="form-group" style="flex:1">
+        <label>TARGET QUIZ (WHERE TO SAVE)</label>
+        <select id="ai-target-quiz" onchange="onAITargetChange()">
+          <option value="global">GLOBAL BANK (All Admins can see)</option>
+        </select>
+        <div class="text-xs text-muted mt-1">Select a specific quiz to keep these questions isolated.</div>
+      </div>
+    </div>
+    <div id="ai-err" class="err-msg"></div>
+    <button class="btn-main" id="btn-ai-gen" onclick="generateAIQuestions()">GENERATE QUESTIONS</button>
+    
+    <div id="ai-loading" class="center-screen hidden">
+      <div class="spin"></div>
+      <div class="wait-title">AI IS THINKING...</div>
+      <div class="text-xs text-muted mt-1">Fetching expert MCQs and explanations</div>
+    </div>
+
+    <div id="ai-preview-area" class="mt-2 hidden">
+      <div class="font-title text-xs text-gold mb-2" style="letter-spacing:1px">PREVIEW GENERATED CONTENT</div>
+      <div id="ai-preview-list" style="max-height:350px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; margin-bottom:15px"></div>
+      <button class="btn-main btn-green" onclick="addAllAIToBank()">ADD ALL TO BANK</button>
+    </div>
+  </div>
+</div>
+
 <!-- ELIMINATION MODAL -->
 <div class="modal-bg" id="modal-elimination">
   <div class="modal" style="max-width:440px">
@@ -359,107 +576,9 @@
   </div>
 </div>
 
-<div class="modal-bg" id="modal-templates">
-  <div class="modal" style="max-width:580px; max-height:90vh; overflow-y:auto">
-    <div class="modal-head"><span>⚡ QUICK QUIZ SETUP & GUIDE</span><button class="modal-x" onclick="closeModal('modal-templates')">✕</button></div>
-    
-    <!-- TEMPLATE SELECTOR -->
-    <div style="background:rgba(0,255,255,0.05);border:1px solid var(--cyan);padding:14px;border-radius:8px;margin-bottom:16px">
-      <div class="font-title text-cyan text-xs mb-2">SELECT TEMPLATE</div>
-      <div class="frow">
-        <div class="form-group">
-          <label>NUMBER OF ROUNDS</label>
-          <select id="tmpl-rounds" onchange="updateTemplatePreview()">
-            <option value="3">3 Rounds (Standard)</option>
-            <option value="4">4 Rounds (Professional)</option>
-            <option value="5">5 Rounds (Comprehensive)</option>
-            <option value="10">10 Rounds (Marathon)</option>
-            <option value="15">15 Rounds (Tournament)</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>TOTAL QUIZ DURATION</label>
-          <select id="tmpl-time" onchange="updateTemplatePreview()">
-            <option value="15">15 Minutes (Fast Pace)</option>
-            <option value="30" selected>30 Minutes (Balanced)</option>
-            <option value="45">45 Minutes (Detailed)</option>
-            <option value="60">60 Minutes (Full Length)</option>
-          </select>
-        </div>
-      </div>
-      <div id="tmpl-preview" class="text-xs text-muted" style="background:rgba(0,0,0,0.2);padding:10px;border-radius:6px;margin-top:8px"></div>
-      <div id="tmpl-err" class="err-msg"></div>
-      <button class="btn-main btn-gold mt-2" onclick="applyQuizTemplate()">APPLY TEMPLATE</button>
-    </div>
-
-    <!-- TEMPLATE GUIDE -->
-    <div class="font-title text-gold text-xs mb-2" style="letter-spacing:2px">📖 TEMPLATE GUIDE — HOW TO CONDUCT</div>
-    
-    <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">
-      <div class="font-title text-cyan" style="font-size:12px">🏃 3 ROUNDS — STANDARD (15-30 min)</div>
-      <div class="text-xs text-muted mt-1" style="line-height:1.6">
-        <strong>Best for:</strong> Quick classroom quizzes, post-lecture assessments<br>
-        <strong>Structure:</strong> R1: Qualifiers (Preliminary) → R2: Knowledge (Selection) → R3: Finals (Final)<br>
-        <strong>Time/Question:</strong> 15 min = 60s | 30 min = 120s<br>
-        <strong>How to run:</strong> Start quiz → Begin R1 → Let all teams answer → End R1 → Eliminate bottom teams → Begin R2 → End R2 → Begin Finals
-      </div>
-    </div>
-
-    <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">
-      <div class="font-title text-cyan" style="font-size:12px">📝 5 ROUNDS — COMPREHENSIVE (30-45 min)</div>
-      <div class="text-xs text-muted mt-1" style="line-height:1.6">
-        <strong>Best for:</strong> Department-level competitions, inter-class quizzes<br>
-        <strong>Structure:</strong> R1-R2 (Preliminary) → R3-R4 (Selection) → R5 (Final)<br>
-        <strong>Time/Question:</strong> 30 min = 72s | 45 min = 108s<br>
-        <strong>How to run:</strong> Start → Run Preliminary rounds → Eliminate weak teams after R2 → Run Selection → Eliminate again after R4 → Grand Finals in R5
-      </div>
-    </div>
-
-    <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">
-      <div class="font-title text-cyan" style="font-size:12px">🏆 10 ROUNDS — MARATHON (45-60 min)</div>
-      <div class="text-xs text-muted mt-1" style="line-height:1.6">
-        <strong>Best for:</strong> College-level tournaments, inter-department events<br>
-        <strong>Structure:</strong> R1-R3 (Preliminary) → R4-R6 (Selection) → R7-R10 (Final)<br>
-        <strong>Time/Question:</strong> 45 min = 54s | 60 min = 72s<br>
-        <strong>How to run:</strong> Start → Run 3 Preliminary rounds → Eliminate bottom 50% → Run 3 Selection rounds → Keep top teams only → 4 Final rounds for championship
-      </div>
-    </div>
-
-    <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">
-      <div class="font-title text-cyan" style="font-size:12px">🎯 15 ROUNDS — TOURNAMENT (60 min)</div>
-      <div class="text-xs text-muted mt-1" style="line-height:1.6">
-        <strong>Best for:</strong> Full-day tournaments, inter-college competitions<br>
-        <strong>Structure:</strong> R1-R5 (Preliminary) → R6-R10 (Selection) → R11-R15 (Final)<br>
-        <strong>Time/Question:</strong> 60 min = 48s per question<br>
-        <strong>How to run:</strong> Same as marathon but with 3 distinct elimination gates
-      </div>
-    </div>
-
-    <!-- STEP-BY-STEP WORKFLOW -->
-    <div class="font-title text-gold text-xs mb-2 mt-3" style="letter-spacing:2px">📋 STEP-BY-STEP ADMIN WORKFLOW</div>
-    <div style="background:rgba(255,215,0,0.05);border:1px solid rgba(255,215,0,0.2);border-radius:8px;padding:14px">
-      <ol class="text-xs text-muted" style="margin:0;padding-left:18px;line-height:2.0">
-        <li><strong>Select Template</strong> — Choose rounds & time above, click APPLY</li>
-        <li><strong>Add Questions</strong> — Go to Questions tab, add 5 per round (or import CSV)</li>
-        <li><strong>Create/Auto-Generate Teams</strong> — Use Teams tab → Auto Setup or manual</li>
-        <li><strong>Start Quiz</strong> — Go to Quiz Control → Click START QUIZ</li>
-        <li><strong>Begin Each Round Manually</strong> — Click BEGIN ROUND (never auto-starts)</li>
-        <li><strong>Monitor Answers</strong> — Watch live answers, timer, pass chains</li>
-        <li><strong>End Round</strong> — Click END ROUND when done</li>
-        <li><strong>Eliminate Teams</strong> — At stage transitions, use 🚫 ELIMINATE TEAMS</li>
-        <li><strong>Next Round</strong> — Click NEXT ROUND (stage gate confirms transitions)</li>
-        <li><strong>Repeat</strong> — Until all rounds complete → Quiz Finished!</li>
-      </ol>
-    </div>
-
-    <div style="background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.3);border-radius:8px;padding:10px;margin-top:12px">
-      <div class="text-xs" style="color:var(--purple)">
-        <strong>💡 KEY RULE:</strong> Rounds NEVER start automatically. You always have full manual control. 
-        Use the stage system (Preliminary → Selection → Final) to organize your elimination process.
-      </div>
-    </div>
   </div>
 </div>
+
 <div class="modal-bg" id="modal-user">
   <div class="modal">
     <div class="modal-head"><span id="user-modal-title">CREATE USER</span><button class="modal-x" onclick="closeModal('modal-user')">✕</button></div>

@@ -10,7 +10,30 @@
 <body>
 <div class="bg-grid"></div>
 <div id="toast-container"></div>
-<!-- Hidden camera elements -->
+<div id="hold-overlay" class="hidden" style="position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:9999; display:flex; flex-direction:column; justify-content:center; align-items:center; backdrop-filter:blur(10px)">
+  <div class="timer-num danger" style="font-size:80px">🛑</div>
+  <div class="round-end-badge" style="border-color:var(--red); color:var(--red)">OFFICIALLY HELD</div>
+  <div class="text-muted mt-2">The administrator has paused your interaction.</div>
+</div>
+
+<div id="admin-warning" class="hidden" style="position:fixed; top:20px; left:50%; transform:translateX(-50%); width:90%; max-width:400px; background:var(--red); color:white; padding:15px; border-radius:8px; border:2px solid gold; z-index:10000; box-shadow:0 0 30px rgba(255,0,0,0.5)">
+  <div style="font-weight:bold; display:flex; align-items:center; gap:10px">⚠️ OFFICIAL WARNING <span id="warn-sender"></span></div>
+  <div id="warn-msg" style="margin-top:5px; font-family:var(--font-s)"></div>
+  <button class="btn-sm mt-1" style="background:white; color:var(--red); border:none" onclick="this.parentElement.classList.add('hidden')">DISMISS</button>
+</div>
+<div id="winner-overlay" class="hidden" style="position:fixed; inset:0; background:radial-gradient(circle, #2d3436 0%, #000 100%); z-index:11000; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; padding:20px; animation: fadeIn 1s ease-out">
+  <div style="font-size:120px; filter: drop-shadow(0 0 20px gold); animation: bounce 2s infinite">🏆</div>
+  <div class="font-title text-gold" style="font-size:42px; letter-spacing:4px; margin-top:20px">OFFICIAL WINNER</div>
+  <div id="winner-name" class="welcome-banner" style="font-size:52px; margin:20px 0; color:white; border-bottom:4px solid var(--gold)">TEAM NAME</div>
+  <div id="winner-score" class="badge badge-purple" style="font-size:20px; padding:10px 25px">SCORE: 00</div>
+  <div class="text-muted mt-4 font-body" style="font-size:16px">Congratulations on your outstanding performance!</div>
+  <button class="btn-main btn-cyan mt-4" onclick="document.getElementById('winner-overlay').classList.add('hidden')" style="max-width:200px">CLOSE</button>
+</div>
+<style>
+  @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-20px); } }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+</style>
+
 <video id="th-cam-video" autoplay muted playsinline style="display:none"></video>
 <canvas id="th-cam-canvas" style="display:none"></canvas>
 
@@ -34,6 +57,7 @@
     <div class="qh-right">
       <div id="th-cam-indicator"></div>
       <div class="score-chip"><div class="text-xs text-muted">SCORE</div><div class="score-val" id="th-score">0</div></div>
+      <button class="btn-sm" style="margin-right:8px; background:rgba(0,255,255,0.1); border:1px solid var(--cyan); color:var(--cyan)" onclick="window.location.reload()">🔄 REFRESH</button>
       <button class="btn-sm btn-gold mr-2" onclick="openConductForm()" style="color:#000; font-weight:bold;">CONDUCT A QUIZ</button>
       <button class="btn-sm btn-red" onclick="doLogout()">EXIT</button>
     </div>

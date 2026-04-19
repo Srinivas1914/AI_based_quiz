@@ -121,7 +121,105 @@ app.post('/api/reports', async (req, res) => {
   }
 });
 
+// ─── AI QUESTION GENERATOR ───────────────────────────────────
+app.post('/api/ai/generate', async (req, res) => {
+  try {
+    const { topic, count, difficulty } = req.body;
+    if (!topic || !count) {
+      return res.status(400).json({ success: false, message: 'Topic and count are required.' });
+    }
+
+    const groqKey = process.env.GROQ_API_KEY;
+
+    if (!groqKey || groqKey.includes('YOUR_')) {
+      return res.status(401).json({ success: false, message: 'Missing valid GROQ_API_KEY in .env file.' });
+    }
+
+    return new Promise((resolve) => {
+      const https = require('https');
+      const prompt = `Generate ${count} multiple choice questions (MCQs) about ${topic} with ${difficulty || 'medium'} difficulty level. 
+      Each question must have 4 options (A, B, C, D) and only one correct answer index (0-3).
+      Return ONLY a JSON array of objects. Do not include markdown code block backticks.
+      Format: [{"text":"...","options":["A","B","C","D"],"correct":[0],"explanation":"..."}]`;
+
+      const data = JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.7,
+        response_format: { type: "json_object" }
+      });
+
+      const options = {
+        hostname: 'api.groq.com',
+        path: '/openai/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${groqKey}`,
+          'User-Agent': 'QuizPlatform/1.0.0 Node.js'
+        }
+      };
+
+      const apiReq = https.request(options, (apiRes) => {
+        let body = '';
+        apiRes.on('data', (chunk) => body += chunk);
+        apiRes.on('end', () => {
+          try {
+            if (body.trim().startsWith('<') || body.trim().startsWith('<!')) {
+              console.error('[AI-Groq] Got HTML instead of JSON! Cloudflare block? HTML preview:', body.substring(0, 150));
+              res.status(502).json({ success: false, message: 'Groq Cloud API is blocking the request (Cloudflare Error).' });
+              return resolve();
+            }
+
+            const result = JSON.parse(body);
+            if (result.error) {
+              console.error('[AI-Groq] API Error:', result.error.message);
+              res.status(502).json({ success: false, message: result.error.message });
+              return resolve();
+            }
+
+            const content = result.choices[0].message.content;
+            const jsonMatch = content.match(/\[[\s\S]*\]/);
+            
+            let questions;
+            if (jsonMatch) {
+              questions = JSON.parse(jsonMatch[0]);
+            } else {
+              const parsed = JSON.parse(content);
+              questions = parsed.questions || (Array.isArray(parsed) ? parsed : [parsed]);
+            }
+
+            if (!Array.isArray(questions)) questions = [questions];
+
+            res.json({ success: true, questions });
+          } catch (e) {
+            console.error('[AI-Groq] Parsing error:', e.message, body.substring(0, 200));
+            res.status(500).json({ success: false, message: 'Failed to process AI response JSON.' });
+          }
+          resolve();
+        });
+      });
+
+      apiReq.on('error', (e) => {
+        console.error('[AI-Groq] HTTPS Request Error:', e.message);
+        res.status(500).json({ success: false, message: 'Connection to Groq Failed: ' + e.message });
+        resolve();
+      });
+
+      apiReq.write(data);
+      apiReq.end();
+    });
+
+  } catch (err) {
+    console.error('[AI] Full error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, message: 'Server error parsing AI response.' });
+    }
+  }
+});
+
 app.get('/api/reports/:quizId', async (req, res) => {
+
   try {
     const { quizId } = req.params;
     const reports = await ReportModel.find({ quizId }).sort({ timestamp: -1 });
@@ -337,8 +435,37 @@ async function saveData(key, val) {
 }
 
 
+app.get('/api/admin-perf', async (req, res) => {
+  try {
+    const reportsStr = syncData['sq_reports'] || '[]';
+    const reports = JSON.parse(reportsStr);
+    
+    // Aggregate by Admin
+    const admins = {};
+    reports.forEach(r => {
+      const name = r.adminName || 'Unknown Admin';
+      if(!admins[name]){
+        admins[name] = { 
+          name, 
+          college: r.college || 'Unknown', 
+          quizCount: 0, 
+          totalTeams: 0, 
+          lastActivity: 0 
+        };
+      }
+      admins[name].quizCount++;
+      admins[name].totalTeams += (r.data?.teams?.length || 0);
+      if(r.timestamp > admins[name].lastActivity) admins[name].lastActivity = r.timestamp;
+    });
 
-// ─── SOCKET.IO SYNC ──────────────────────────────────────────
+    res.json({ success: true, data: Object.values(admins) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to fetch admin performance' });
+  }
+});
+
+// ─── SOCKET.IO ───────────────────────────────────────────────
+
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token;
   if (!token) return next();
@@ -465,6 +592,19 @@ io.on('connection', (socket) => {
     } catch (err) {
       console.warn(`[SECURITY] Sync rejected: Invalid session from ${ip}`);
     }
+  });
+
+  // RELAY ADMIN COMMANDS (Warn, Hold, Msg, Mic)
+  socket.on('admin_cmd', (data) => {
+    // data: { type, target, msg, status, quizId }
+    console.log(`[CMD] Admin ${user?.name} issued ${data.type} to ${data.target}`);
+    io.emit('admin_cmd', { ...data, sender: user?.name });
+  });
+
+  socket.on('admin_audio', (data) => {
+    // data: { audio, target, quizId }
+    console.log(`[CMD] Admin ${user?.name} broadcasting audio to ${data.target}`);
+    io.emit('admin_audio', { ...data, sender: user?.name });
   });
 
   socket.on('disconnect', () => {

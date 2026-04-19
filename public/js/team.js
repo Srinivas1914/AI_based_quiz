@@ -56,8 +56,62 @@ function init(){
 
   render();
   onUpdate(render);
+  initSocketListeners();
   setInterval(render, 1000);
 }
+
+function initSocketListeners(){
+  const socket = window.socket || io({ auth: { token: Store.getToken() } });
+  window.socket = socket;
+
+  socket.on('admin_audio', (data) => {
+    // data: { audio, target, quizId }
+    if(data.target !== 'all' && data.target !== teamId) return;
+    const audio = new Audio(data.audio);
+    audio.play().catch(e => console.warn('Audio auto-play blocked:', e));
+    toast(`📢 Public Announcement from ${data.sender||'Admin'}`, 'info');
+  });
+
+  socket.on('admin_cmd', (data) => {
+    // data: { type, target, msg, status, sender }
+    if(data.target !== 'all' && data.target !== teamId) return;
+    
+    if(data.type === 'warn'){
+      const el = document.getElementById('admin-warning');
+      document.getElementById('warn-sender').textContent = `FROM ${data.sender?.toUpperCase() || 'ADMIN'}`;
+      document.getElementById('warn-msg').textContent = data.msg;
+      el.classList.remove('hidden');
+      // Auto-hide after 15s
+      setTimeout(() => el.classList.add('hidden'), 15000);
+    }
+    
+    if(data.type === 'hold'){
+      const overlay = document.getElementById('hold-overlay');
+      if(data.status) overlay.classList.remove('hidden');
+      else overlay.classList.add('hidden');
+    }
+    
+    if(data.type === 'msg'){
+      toast(`💬 MESSAGE: ${data.msg}`, 'info', 8000);
+    }
+    
+    if(data.type === 'winner'){
+      const overlay = document.getElementById('winner-overlay');
+      const wName = document.getElementById('winner-name');
+      const wScore = document.getElementById('winner-score');
+      if(overlay && wName && wScore){
+        wName.textContent = data.teamName.toUpperCase();
+        wScore.textContent = `FINAL SCORE: ${data.score}`;
+        overlay.classList.remove('hidden');
+        // Play victory sound if possible
+        const winSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3');
+        winSound.play().catch(() => {});
+      }
+    }
+  });
+}
+
+
 
 function checkAdminWarn(){
   const key='sq_team_warn_'+teamId;
