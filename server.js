@@ -386,7 +386,6 @@ mongoose.connection.on('reconnected', () => {
 
 
 
-const fs = require('fs');
 const DATA_FILE = path.join(__dirname, 'data.json');
 let syncData = {};
 
@@ -422,7 +421,7 @@ async function saveData(key, val) {
 
     // Persist to local file IMMEDIATELY (Safety Fallback)
     try {
-      const fs = require('fs');
+      // Using global fs
       fs.writeFileSync(path.join(staticDir, 'data.json'), JSON.stringify(syncData, null, 2));
     } catch(fsErr) {
       console.warn('[SERVER] File write failed, relying on memory:', fsErr.message);
