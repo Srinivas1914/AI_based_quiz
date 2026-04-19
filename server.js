@@ -62,14 +62,29 @@ app.post('/api/login', (req, res) => {
   }
 
   // 2. Check Database Users (Normal Admin, Participant, Viewer)
-  const usersStr = syncData['sq_users'];
-  const users = usersStr ? JSON.parse(usersStr) : [];
-  const user = users.find(u => u.username === username && u.password === password);
+  let usersStr = syncData['sq_users'];
+  let users = usersStr ? JSON.parse(usersStr) : [];
+  let user = users.find(u => u.username === username && u.password === password);
+
+  // Fallback: If not in memory, check MongoDB directly (Sync Latency Fix)
+  if (!user && mongoose.connection.readyState === 1) {
+    try {
+      const dbDoc = await mongoose.model('Storage').findOne({ key: 'sq_users' });
+      if (dbDoc) {
+        const dbUsers = JSON.parse(dbDoc.val || '[]');
+        user = dbUsers.find(u => u.username === username && u.password === password);
+        if (user) {
+           console.log(`[AUTH] Login success via MongoDB Fallback for: ${username}`);
+           syncData['sq_users'] = dbDoc.val; // Refresh memory cache
+        }
+      }
+    } catch (dbErr) { console.error('[AUTH] DB Fallback failed:', dbErr.message); }
+  }
 
   if (user) {
     const claims = { userId: user.id, role: user.role, name: user.name, roll: user.roll, college: user.college, quizId: quizId || user.currentQuizId };
     const token = jwt.sign(claims, JWT_SECRET, { expiresIn: '24h' });
-    return res.json({ success: true, token, session: { role: user.role, userId: user.id, name: user.name, roll: user.roll, college: user.college, quizId: user.currentQuizId } });
+    return res.json({ success: true, token, session: { role: user.role, userId: user.id, name: user.name, roll: user.roll, college: user.college, quizId: user.currentQuizId || quizId } });
   }
 
   // 3. Check Teams

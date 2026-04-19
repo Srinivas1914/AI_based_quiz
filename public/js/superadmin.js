@@ -1501,6 +1501,8 @@ function actionAccept(reqId, expiry){
   toast(`Approved! Generated Quiz ID: ${quizId}`, 'success');
   closeModal('modal-quiz-action');
   renderRequests();
+  renderUsers();
+  renderManaged();
 }
 
 function actionIgnore(reqId, reason){
