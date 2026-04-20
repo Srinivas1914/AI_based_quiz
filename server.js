@@ -434,13 +434,10 @@ async function saveData(key, val) {
     syncData[key] = val;
     syncData[`_ts_${key}`] = timestamp;
 
-    // Persist to local file IMMEDIATELY (Safety Fallback)
-    try {
-      // Using global DATA_FILE path for consistency
-      fs.writeFileSync(DATA_FILE, JSON.stringify(syncData, null, 2));
-    } catch(fsErr) {
-      console.warn('[SERVER] File write failed, relying on memory:', fsErr.message);
-    }
+    // Persist to local file (Safety Fallback) - Use async for better performance
+    fs.writeFile(DATA_FILE, JSON.stringify(syncData, null, 2), (fsErr) => {
+      if(fsErr) console.warn('[SERVER] File write failed:', fsErr.message);
+    });
 
     // Check connection state for MongoDB
     const state = mongoose.connection.readyState;
@@ -552,28 +549,73 @@ io.on('connection', (socket) => {
       const decoded = jwt.verify(token, JWT_SECRET);
       
       // ADMIN-COLLEGE DATA ISOLATION FOR USERS
-      // ─── USER LIST SYNC (SUPERADMIN ONLY) ───
+      // ─── USER LIST SYNC (SECURE MERGING) ───
       if (data.key === 'sq_users') {
-          if (!decoded.isSuper) {
-             console.warn(`[SECURITY] Rejected: ${decoded.name} (${decoded.role}) tried to sync sq_users list. Access Denied.`);
-             return; 
-          }
-          
-          // CRITICAL: Prevent accidental mass deletion if the list is empty and it shouldn't be
           try {
-             const newUsers = JSON.parse(data.val || '[]');
-             const currentUsersStr = syncData['sq_users'];
-             const currentUsers = currentUsersStr ? JSON.parse(currentUsersStr) : [];
-             
-             // If local memory has many users but incoming is empty, treat as error/stale push
-             if (currentUsers.length > 5 && newUsers.length === 0) {
-                console.error(`[SYNC] BLOCKED: Superadmin ${decoded.name} tried to push an EMPTY user list over ${currentUsers.length} existing users. Stale cache?`);
-                return;
+             let incomingUsers = JSON.parse(data.val || '[]');
+             const timestamp = data._ts || Date.now();
+
+             if (!decoded.isSuper) {
+                // NORMAL ADMIN: Only allowed to update users in their partition (college/quiz)
+                const currentAllUsersStr = syncData['sq_users'] || '[]';
+                const currentAllUsers = JSON.parse(currentAllUsersStr);
+
+                const adminInst = (decoded.college || '').trim().toLowerCase();
+                const adminQuizId = decoded.quizId;
+
+                // 1. Keep users from other institutions/quizzes
+                const otherUsers = currentAllUsers.filter(u => {
+                   const uInst = (u.college || '').trim().toLowerCase();
+                   const matchCollege = uInst && adminInst && uInst === adminInst;
+                   const matchQuiz = adminQuizId && u.currentQuizId === adminQuizId;
+                   return !(matchCollege || matchQuiz);
+                });
+
+                // 2. Merge others with the incoming (updated) institutional users
+                const mergedUsers = [...otherUsers, ...incomingUsers];
+                data.val = JSON.stringify(mergedUsers);
+                
+                console.log(`[SYNC] Merged ${incomingUsers.length} users from Admin ${decoded.name}. Global total: ${mergedUsers.length}`);
+             } else {
+                // SUPERADMIN: Full overwrite with safety check
+                const currentUsersStr = syncData['sq_users'] || '[]';
+                const currentUsers = JSON.parse(currentUsersStr);
+                
+                if (currentUsers.length > 5 && incomingUsers.length === 0) {
+                   console.error(`[SYNC] BLOCKED: Superadmin ${decoded.name} tried to empty user list.`);
+                   return;
+                }
+                console.log(`[SYNC] Superadmin ${decoded.name} updated global user list. Count: ${incomingUsers.length}`);
              }
-             
-             console.log(`[SYNC] Superadmin ${decoded.name} updated global user list. Count: ${newUsers.length}`);
+
+             // Save the merged data
+             syncData[data.key] = data.val;
+             syncData[`_ts_${data.key}`] = timestamp;
+             await saveData(data.key, data.val);
+
+             // BROADCAST with per-client filtering to maintain isolation
+             const allSockets = await io.fetchSockets();
+             for (const s of allSockets) {
+                if (s.id === socket.id) continue; // Skip sender
+
+                const targetUser = s.user; 
+                let valToSend = data.val;
+                
+                // If target is a limited Admin, they only get eyes on their own users
+                if (targetUser && targetUser.role === 'admin' && !targetUser.isSuper) {
+                   const users = JSON.parse(valToSend || '[]');
+                   const tAdminInst = (targetUser.college || '').trim().toLowerCase();
+                   const filtered = users.filter(u => {
+                     const uInst = (u.college || '').trim().toLowerCase();
+                     return (uInst && tAdminInst && uInst === tAdminInst) || (targetUser.quizId && u.currentQuizId === targetUser.quizId);
+                   });
+                   valToSend = JSON.stringify(filtered);
+                }
+                s.emit('sync', { key: data.key, val: valToSend, _ts: timestamp });
+             }
+             return; // Logic complete for sq_users
           } catch(e) {
-             console.error('[SYNC] Failed to parse sq_users update:', e.message);
+             console.error('[SYNC] Failed to process sq_users update:', e.message);
              return;
           }
       }
