@@ -160,22 +160,9 @@
       const grid = document.getElementById('cam-grid');
       const activeTeam = teams[quiz.currentTeamIdx];
       const search = document.getElementById('mon-search').value.toLowerCase();
-      const viewMode = document.getElementById('mon-view-mode').value;
-      
-      // Filter by Quiz ID (Isolation)
-      let myTeams = teams;
-      let myParts = participants;
-      
-      if(sess && !sess.isSuper && sess.quizId){
-         myTeams = teams.filter(t => t.quizId === sess.quizId);
-         myParts = participants.filter(p => !p.currentQuizId || p.currentQuizId === sess.quizId);
-      }
-      
-      // Combine and filter by search
-      const streamable = [
-        ...myTeams.map(t => ({ ...t, type: 'TEAM', ident: `T${t.teamNumber}` })),
-        ...myParts.map(p => ({ ...p, type: 'PART', ident: 'P' }))
-      ].filter(u => {
+      // Search filter
+      const allMonitored = Store.getMonitoredUsers();
+      const streamable = allMonitored.filter(u => {
         if(search && !u.name.toLowerCase().includes(search) && !u.ident.toLowerCase().includes(search)) return false;
         
         const status = camStatus[u.id];

@@ -676,7 +676,7 @@ io.on('connection', (socket) => {
       
       // LAG FIX: Skip DB persistence for high-frequency ephemeral data (camera frames & status)
       // This drastically reduces I/O wait times and improves sync speed.
-      const isEphemeral = data.key.startsWith('sq_cam_') || data.key === 'sq_cam_status' || data.key === 'sq_activity';
+      const isEphemeral = data.key.startsWith('sq_cam_') || data.key.startsWith('sq_cam_status') || data.key.startsWith('sq_activity');
       
       if (!isEphemeral) {
         saveData(data.key, data.val).catch(e => console.error('[SYNC] DB save fail:', data.key, e.message));

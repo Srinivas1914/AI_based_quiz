@@ -662,14 +662,9 @@
         <input type="text" id="ai-topic" placeholder="e.g. Thermodynamics, Data Structures, Modern Art...">
       </div>
       <div class="frow">
-        <div class="form-group">
-          <label>NUMBER OF QUESTIONS</label>
-          <select id="ai-count">
-            <option value="5">5 Questions</option>
-            <option value="10">10 Questions</option>
-            <option value="15">15 Questions</option>
-            <option value="20">20 Questions</option>
-          </select>
+        <div class="form-group hidden">
+          <label>NUMBER OF QUESTIONS (Auto-assigned)</label>
+          <input type="number" id="ai-count" value="5">
         </div>
         <div class="form-group">
           <label>DIFFICULTY LEVEL</label>
@@ -682,8 +677,8 @@
         </div>
       </div>
       <div class="form-group">
-        <label>ASSIGN TO ROUND</label>
-        <select id="ai-round">
+        <label>ASSIGN TO ROUND (Determines Question Count)</label>
+        <select id="ai-round" onchange="onAIRoundChange()">
           <option value="">Choose a round...</option>
         </select>
       </div>

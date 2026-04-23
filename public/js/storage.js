@@ -337,6 +337,25 @@ const Store = {
       activities: acts.slice(0, 5),
       lastSeen: acts[0]?.time || "—"
     };
+  },
+  // Get all entities that should be monitored (Teams + Participants)
+  getMonitoredUsers(){
+    const sess = this.getSession();
+    const teams = this.getActiveTeams();
+    const users = this.getUsers().filter(u => u.role === 'participant');
+    
+    // Isolation filter
+    let myTeams = teams;
+    let myParts = users;
+    if(sess && !sess.isSuper && sess.quizId){
+       myTeams = teams.filter(t => t.quizId === sess.quizId);
+       myParts = users.filter(p => !p.currentQuizId || p.currentQuizId === sess.quizId);
+    }
+    
+    return [
+      ...myTeams.map(t => ({ ...t, monitorType: 'TEAM', ident: `T${t.teamNumber}` })),
+      ...myParts.map(p => ({ ...p, monitorType: 'PART', ident: 'P' }))
+    ];
   }
 };
 

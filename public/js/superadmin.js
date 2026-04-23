@@ -738,18 +738,27 @@ function renderRounds(){
   const totalMins=rounds.reduce((a,b)=>a+Math.ceil(((b.questionCount||0)*(b.timePerQuestion||60) + (b.roundTimeLimit||0)*60)/60),0);
   ov.innerHTML=`<span class="badge badge-purple">${rounds.length} Rounds</span> <span class="badge badge-cyan">${total} Total Questions</span> <span class="badge badge-gold">~${totalMins} Minutes Est.</span>`;
 
+  const questions = Store.getQuestions();
   el.innerHTML=`<table class="dtable"><thead><tr>
     <th style="width:30px"><input type="checkbox" id="chk-rounds-all" onclick="toggleSelectAll('rounds', this.checked)"></th>
     <th>ID</th><th>NAME</th><th>STAGE</th><th>QS</th><th>TIME/Q</th><th>SUBSEC</th><th></th></tr></thead><tbody>`+
-  rounds.map((r,i)=>`<tr>
+  rounds.map((r,i)=>{
+    const range = getRoundQRange(rounds, i);
+    const roundQs = questions.slice(range.start, range.start + range.count);
+    const isMissing = roundQs.length < r.questionCount || roundQs.some(q => !q || q.isPlaceholder);
+    
+    return `<tr>
     <td><input type="checkbox" class="chk-round" value="${r.id}" onclick="onSelectRow('rounds')"></td>
     <td class="text-xs text-muted">R${r.roundNumber || i+1}</td>
-    <td><strong>${r.name}</strong></td>
+    <td><strong class="${isMissing ? 'text-red' : ''}">${r.name}</strong></td>
     <td><span class="badge badge-purple">${r.stage||'Preliminary'}</span></td>
-    <td><span class="badge badge-cyan">${r.questionCount}</span></td>
+    <td><span class="badge ${isMissing ? 'badge-red' : 'badge-cyan'}">${r.questionCount}</span></td>
     <td>${r.timePerQuestion}s</td>
     <td class="text-xs text-muted">${r.roundTimeLimit?`+${r.roundTimeLimit}m`:''}</td>
-    <td><button class="btn-icon" onclick="openEditRound('${r.id}')">✏️</button></td></tr>`).join('')+'</tbody></table>';
+    <td style="white-space:nowrap">
+      <button class="btn-icon" onclick="openEditRound('${r.id}')" title="Edit Round">✏️</button>
+      <button class="btn-icon" onclick="openAIGenForRound(${i})" title="AI Generate Questions">🤖</button>
+    </td></tr>`}).join('')+'</tbody></table>';
   onSelectRow('rounds');
 }
 
@@ -1224,22 +1233,22 @@ function quizReset(){
 
 // ─── CAMERA MONITORING ────────────────────────────────────────
 function renderCamera(){
-  const teams=Store.getActiveTeams(), camStatus=Store.getCamStatus();
+  const monitored=Store.getMonitoredUsers(), camStatus=Store.getCamStatus();
   const alerts=Store.getAlerts().filter(a=>!a.dismissed);
   const el=document.getElementById('cam-grid');
   const alertsEl=document.getElementById('cam-alerts');
 
-  if(!teams.length){ el.innerHTML='<div class="empty-state">No active teams.</div>'; return; }
+  if(!monitored.length){ el.innerHTML='<div class="empty-state">No active cameras.</div>'; return; }
 
-  el.innerHTML=teams.map(t=>{
-    const cs=camStatus[t.id]||{};
-    const frame=Store.getCamFrame(t.id);
+  el.innerHTML=monitored.map(u=>{
+    const cs=camStatus[u.id]||{};
+    const frame=Store.getCamFrame(u.id);
     const lastSeen=cs.lastSeen?Math.floor((Date.now()-cs.lastSeen)/1000):null;
     const staleSec=30;
     const stale=lastSeen===null||lastSeen>staleSec;
     return `<div class="cam-card ${cs.suspicious?'cam-suspicious':''}">
       <div class="cam-head">
-        <span class="font-title text-xs">T${t.teamNumber}: ${t.name}</span>
+        <span class="font-title text-xs"><span class="badge ${u.monitorType==='TEAM'?'badge-gold':'badge-cyan'}" style="padding:1px 3px;font-size:8px;margin-right:4px">${u.ident}</span> ${u.name}</span>
         <div style="display:flex;gap:5px;align-items:center">
           ${cs.tabHidden?'<span class="badge badge-red" style="font-size:8px">TAB HIDDEN</span>':''}
           ${cs.suspicious?'<span class="badge badge-red" style="font-size:8px;animation:tflash .5s infinite">⚠ SUSPICIOUS</span>':''}
@@ -1247,7 +1256,7 @@ function renderCamera(){
         </div>
       </div>
       <div class="cam-frame-wrap">
-        ${frame&&!stale?`<img src="${frame}" class="cam-img" alt="${t.name} camera">`
+        ${frame&&!stale?`<img src="${frame}" class="cam-img" alt="${u.name} camera">`
           :`<div class="cam-offline"><span>${stale?'📷 Camera offline / no feed':'⏳ Waiting for feed...'}</span></div>`}
       </div>
       <div class="cam-foot text-xs text-muted">${lastSeen!==null?`Last seen: ${lastSeen}s ago`:'No connection'}</div>
@@ -1960,6 +1969,18 @@ function exportAdminPerf(){
 
 // AI QUESTION GENERATOR LOGIC
 
+function openAIGenForRound(idx) {
+  goSection('questions');
+  openAIGenModal();
+  setTimeout(() => {
+    const sel = document.getElementById('ai-round');
+    if(sel) {
+      sel.value = idx;
+      onAIRoundChange();
+    }
+  }, 100);
+}
+
 function openAIGenModal(){
   const managed = Store.getManagedQuizzes();
   const targetSel = document.getElementById('ai-target-quiz');
@@ -1983,8 +2004,31 @@ function onAITargetChange(){
       roundSel.innerHTML = '<option value="">BANK (No rounds in this quiz)</option>';
     } else {
       roundSel.innerHTML = '<option value="">BANK (Manual Assignment)</option>' + 
-        rounds.map((r,i)=>`<option value="${i}">R${r.roundNumber||i+1}: ${r.name}</option>`).join('');
+        rounds.map((r,i)=>`<option value="${i}">R${r.roundNumber||i+1}: ${r.name} (${r.questionCount||0} Qs)</option>`).join('');
     }
+  }
+  onAIRoundChange();
+}
+
+function onAIRoundChange() {
+  const target = document.getElementById('ai-target-quiz').value;
+  const roundIdx = document.getElementById('ai-round').value;
+  const countInput = document.getElementById('ai-count');
+  const btn = document.getElementById('btn-ai-gen');
+
+  if(roundIdx !== '') {
+    const rounds = (target === 'global') ? [] : (load(`sq_rounds_${target}`, []));
+    const r = rounds[parseInt(roundIdx)];
+    if(r && r.questionCount) {
+      countInput.value = r.questionCount;
+      btn.textContent = `GENERATE ${r.questionCount} QUESTIONS FOR "${r.name.toUpperCase()}"`;
+    } else {
+      countInput.value = 5;
+      btn.textContent = `GENERATE 5 QUESTIONS`;
+    }
+  } else {
+    countInput.value = 5;
+    btn.textContent = `GENERATE QUESTIONS (BANK)`;
   }
 }
 
@@ -2140,24 +2184,43 @@ function addAllAIToBank(){
   const target = document.getElementById('ai-target-quiz').value;
   const roundIdx = document.getElementById('ai-round').value;
   
-  // Custom partition logic for Superadmin targeting
   const qKey = (target === 'global') ? 'sq_questions' : `sq_questions_${target}`;
   const rKey = (target === 'global') ? 'sq_rounds' : `sq_rounds_${target}`;
   
   let questions = load(qKey, []);
   let rounds = load(rKey, []);
   
+  if(!aiQuestions || !aiQuestions.length){
+    toast('No questions found to add!', 'error');
+    return;
+  }
+
   let insertIdx = questions.length;
   if(roundIdx !== ''){
     const ri = parseInt(roundIdx);
     const range = getRoundQRange(rounds, ri);
-    insertIdx = range.end + 1; 
-  }
-  
-  // Double check global aiQuestions
-  if(!aiQuestions || !aiQuestions.length){
-    toast('No questions found to add!', 'error');
-    return;
+    
+    // FILL GAPS: If the target round starts beyond current length, pad with placeholders
+    // to maintain strict positional isolation.
+    if(questions.length < range.start) {
+      const paddingCount = range.start - questions.length;
+      const placeholders = Array.from({length: paddingCount}, (_, k) => ({
+        id: 'PLACEHOLDER_' + Math.random().toString(36).substr(2, 5).toUpperCase(),
+        text: '--- Pending Question Assignment ---',
+        options: ['','','',''],
+        correct: [0],
+        type: 'single',
+        isPlaceholder: true
+      }));
+      questions.push(...placeholders);
+    }
+
+    // Remove existing questions in that range first to prevent "merging/spilling"
+    const countToRemove = Math.min(questions.length - range.start, range.count);
+    if (countToRemove > 0) {
+      questions.splice(range.start, countToRemove);
+    }
+    insertIdx = range.start;
   }
 
   // Create proper question objects
