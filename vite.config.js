@@ -26,6 +26,8 @@ export default defineConfig({
         superadmin: resolve(__dirname, 'pages/superadmin.html'),
         participant: resolve(__dirname, 'pages/participant.html'),
         team: resolve(__dirname, 'pages/team.html'),
+        monitor: resolve(__dirname, 'public/camera-monitor.html'),
+        livefeed: resolve(__dirname, 'public/live-feed.html'),
       },
 
     },
